@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "npx nodemon index.js",
-    "start": "forever start --uid server index.js",
+    "start": "forever start --uid server -a index.js",
     "stop": "forever stop server"
   },
   "author": "",
