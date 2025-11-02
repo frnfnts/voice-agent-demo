@@ -1,8 +1,11 @@
+# export FRONTEND_URL=https://recallai-demo.netlify.app
+export FRONTEND_URL=https://voice-agent-demo-1yr.pages.dev
 export RECALL_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # export NGROK_URL="eloy-xxxxxxxxxxxx-xxxxxx.ngrok-free.dev"
 export NGROK_URL="52.193.78.104:3000"
 
 export MEETING_URL=https://meet.google.com/qgm-dpzi-cwn
+
 
 # NGROK を使う場合は config.url は ws じゃなくて wss にする
 # TODO: 自前サーバーの場合も wss を使えるようにしたい
@@ -13,12 +16,12 @@ curl --request POST \
   --header 'content-type: application/json' \
   --data '{
     "meeting_url": "'"${MEETING_URL}"'",
-    "bot_name": "Recall.ai Notetaker",
+    "bot_name": "Aya",
     "output_media": {
       "camera": {
         "kind": "webpage",
         "config": {
-          "url": "https://recallai-demo.netlify.app?wss=ws://'"${NGROK_URL}"'"
+          "url": "'"${FRONTEND_URL}"'?wss=ws://'"${NGROK_URL}"'"
         }
       }
     },
