@@ -6,7 +6,7 @@ build:
 	cd client && npm run build
 
 ngrok:
-	ngrok 3000
+	ngrok http 3000
 
 join:
 	./join-bot.sh
