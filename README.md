@@ -1,3 +1,16 @@
+# 使い方
+
+- `join-bot.sh` の `ngrok_url` と `meeting_url` を自分のものに変更してください。
+- AI の挙動を変更したい場合は、`client/src/conversation_config.ts` ファイルを編集してください。
+
+# 注意点等
+
+- bot が会議に参加してから、バックエンドサーバーと接続されるまで少し時間がかかります。Websocket の接続が完了するまでお待ち下さい。
+- 本番環境では、`ws://` の代わりに `wss://` を使用することが推奨されます。
+- フロントエンドは、変更が `main` ブランチにプッシュされると、自動的に個人の Cloudflare Pages にデプロイされます。
+
+
+----- ↓ ここから original README.md -----
 # Recall.ai Real-Time Voice Agent
 
 ### [Watch the Demo Here!](https://www.loom.com/share/2a02fac2643441c1990da861e829892c)
