@@ -1,10 +1,8 @@
-# export FRONTEND_URL=https://recallai-demo.netlify.app
-export FRONTEND_URL=https://voice-agent-demo-1yr.pages.dev
-export RECALL_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# export NGROK_URL="eloy-xxxxxxxxxxxx-xxxxxx.ngrok-free.dev"
-export NGROK_URL="52.193.78.104:3000"
-
-export MEETING_URL=https://meet.google.com/qgm-dpzi-cwn
+# 環境変数が既に設定されている場合はそれを使用し、未設定の場合はデフォルト値を使用
+export FRONTEND_URL="${FRONTEND_URL:-https://voice-agent-demo-1yr.pages.dev}"
+export RECALL_TOKEN="${RECALL_TOKEN:-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
+export NGROK_URL="${NGROK_URL:-52.193.78.104:3000}"
+export MEETING_URL="${MEETING_URL:-https://meet.google.com/qgm-dpzi-cwn}"
 
 
 # NGROK を使う場合は config.url は ws じゃなくて wss にする
