@@ -27,6 +27,11 @@ curl --request POST \
       "zoom": "web_4_core",
       "google_meet": "web_4_core",
       "microsoft_teams": "web_4_core"
+    },
+    "recording_config": {
+      "include_bot_in_recording": {
+        "audio": true
+      }
     }
   }'
 
