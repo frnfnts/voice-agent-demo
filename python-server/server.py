@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import copy
 from dotenv import load_dotenv
 import websockets
 from websockets.legacy.server import WebSocketServerProtocol, serve
@@ -15,14 +16,33 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 PORT = int(os.getenv("PORT", 3000))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "debug").lower()  # set LOG_LEVEL=info to silence debug logs
+DEBUG_ENABLED = LOG_LEVEL == "debug"
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY must be set in .env file")
 
 
+def debug_log_event(message: str, event: dict):
+    """デバッグ用にイベントをJSONで出力する。audioとinstructionsは100文字に短縮。"""
+    if not DEBUG_ENABLED:
+        return
+
+    truncated = copy.deepcopy(event)
+
+    # audio と session.instructions の場合は100文字に切り詰める
+    if "audio" in truncated and isinstance(truncated["audio"], str) and len(truncated["audio"]) > 100:
+        truncated["audio"] = truncated["audio"][:100] + "..."
+    if "session" in truncated and isinstance(truncated.get("session"), dict):
+        if "instructions" in truncated["session"] and isinstance(truncated["session"]["instructions"], str) and len(truncated["session"]["instructions"]) > 100:
+            truncated["session"]["instructions"] = truncated["session"]["instructions"][:100] + "..."
+
+    logger.debug(f"{message}: {json.dumps(truncated, indent=2)}")
+
+
 async def connect_to_openai():
     """Connect to OpenAI's WebSocket endpoint."""
-    uri = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
+    uri = "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini-2025-12-15"
 
     try:
         ws = await connect(
@@ -40,6 +60,7 @@ async def connect_to_openai():
         try:
             event = json.loads(response)
             if event.get("type") != "session.created":
+                logger.error(f"Unexpected event type: {event}")
                 raise Exception(f"Expected session.created, got {event.get('type')}")
             logger.info("Received session.created response")
 
@@ -102,6 +123,7 @@ class WebSocketRelay:
                 try:
                     event = json.loads(message)
                     logger.info(f'Relaying "{event.get("type")}" to OpenAI')
+                    debug_log_event("Queued Browser -> OpenAI", event)
                     await openai_ws.send(message)
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON from browser: {message}")
@@ -113,6 +135,7 @@ class WebSocketRelay:
                         try:
                             event = json.loads(message)
                             logger.info(f'Relaying "{event.get("type")}" to OpenAI')
+                            debug_log_event("Browser -> OpenAI", event)
                             await openai_ws.send(message)
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from browser: {message}")
@@ -129,8 +152,9 @@ class WebSocketRelay:
                         try:
                             event = json.loads(message)
                             logger.info(
-                                f'Relaying "{event.get("type")}" from OpenAI: {message}'
+                                f'Relaying "{event.get("type")}" from OpenAI'
                             )
+                            debug_log_event("OpenAI -> Browser", event)
                             await websocket.send(message)
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from OpenAI: {message}")
@@ -187,4 +211,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
