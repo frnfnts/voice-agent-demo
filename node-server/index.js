@@ -15,7 +15,27 @@ if (!OPENAI_API_KEY) {
 }
 
 const PORT = 3000;
+const LOG_LEVEL = process.env.LOG_LEVEL || "debug"; // set LOG_LEVEL=info to silence debug logs
+const DEBUG_ENABLED = LOG_LEVEL === "debug";
 const wss = new WebSocketServer({ port: PORT });
+
+/**
+ * デバッグ用にイベントをJSONで出力する
+ * @param {object} event - イベントオブジェクト
+ */
+function debugLogEvent(event) {
+  if (!DEBUG_ENABLED) return;
+
+  // audio と session.instructions の場合は100文字に切り詰める
+  if (event.audio) {
+    event.audio = event.audio.substring(0, 100) + "...";
+  }
+  if (event.session?.instructions) {
+    event.session.instructions = event.session.instructions.substring(0, 100) + "...";
+  }
+
+  console.debug(JSON.stringify(event, null, 2));
+}
 
 wss.on("connection", async (ws, req) => {
   if (!req.url) {
@@ -38,6 +58,19 @@ wss.on("connection", async (ws, req) => {
   // Relay: OpenAI Realtime API Event -> Browser Event
   client.realtime.on("server.*", (event) => {
     console.log(`Relaying "${event.type}" to Client`);
+    if (event.type === "error") {
+      console.error(`Error from OpenAI: ${JSON.stringify(event.error)}`);
+      client.disconnect();
+      ws.close();
+      return;
+    }
+    if (event.type === "response.done" && event.response?.status === "failed") {
+      console.error(`Response failed: ${JSON.stringify(event.response.status_details?.error)}`);
+      client.disconnect();
+      ws.close();
+      return;
+    }
+    debugLogEvent(event);
     ws.send(JSON.stringify(event));
   });
   client.realtime.on("close", () => ws.close());
@@ -49,6 +82,7 @@ wss.on("connection", async (ws, req) => {
     try {
       const event = JSON.parse(data);
       console.log(`Relaying "${event.type}" to OpenAI`);
+      debugLogEvent(event);
       client.realtime.send(event.type, event);
     } catch (e) {
       console.error(e.message);
