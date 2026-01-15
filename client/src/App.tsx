@@ -68,6 +68,7 @@ export function App() {
       // Always use VAD mode
       client.updateSession({
         turn_detection: { type: "server_vad" },
+        // @ts-ignore  ライブラリが古いので marin が指定できないので無視する
         voice: 'marin',
       });
 
