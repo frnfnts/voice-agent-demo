@@ -61,13 +61,14 @@ export function App() {
       client.sendUserMessageContent([
         {
           type: `input_text`,
-          text: `Hello!`,
+          text: `こんにちは!`,
         },
       ]);
 
       // Always use VAD mode
       client.updateSession({
         turn_detection: { type: "server_vad" },
+        voice: 'marin',
       });
 
       // Check if we're already recording before trying to pause
