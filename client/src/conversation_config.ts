@@ -1,4 +1,5 @@
-export const instructions = `System settings:
+// Google Drive から取得する指示文のフォールバック設定
+export const fallbackInstructions = `System settings:
 Tool use: enabled.
 
 # Instructions:

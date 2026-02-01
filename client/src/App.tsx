@@ -2,19 +2,39 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { RealtimeClient } from "@openai/realtime-api-beta";
 // @ts-expect-error - External library without type definitions
 import { WavRecorder, WavStreamPlayer } from "./lib/wavtools/index.js";
-import { instructions } from "./conversation_config.js";
+import {
+  fallbackInstructions,
+} from "./conversation_config.js";
+import { getDocContentAsString } from "./lib/driveInstructions";
 import "./App.css";
 
 const clientRef = { current: null as RealtimeClient | null };
 const wavRecorderRef = { current: null as WavRecorder | null };
 const wavStreamPlayerRef = { current: null as WavStreamPlayer | null };
 
+const conversation_config_file_id = import.meta.env.VITE_GDRIVE_INSTRUCTION_FILE_ID ?? "";
+const keyfile_json  = import.meta.env.VITE_KEYFILE_JSON ?? "";
+
+type InstructionInfo = {
+  source: "google-drive" | "fallback" | "none";
+  text?: string;
+  error?: string;
+};
+
 export function App() {
   const params = new URLSearchParams(window.location.search);
   const RELAY_SERVER_URL = params.get("wss");
+  const IS_DEBUG = params.get("debug") === "true";
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >("disconnected");
+  const [instructionInfo, setInstructionInfo] = useState<InstructionInfo>({
+    source: "none",
+  });
+
+  if (keyfile_json === "" || conversation_config_file_id === "") {
+    throw new Error("Missing required environment variables for Google Drive access");
+  }
 
   if (!clientRef.current) {
     clientRef.current = new RealtimeClient({
@@ -104,7 +124,7 @@ export function App() {
    * Core RealtimeClient and audio capture setup
    * Set all of our instructions, tools, events and more
    */
-  useEffect(() => {
+  useEffect(() => {(async () => {
     // Only run the effect if there's no error
     if (!errorMessage) {
       connectConversation();
@@ -112,8 +132,22 @@ export function App() {
       const client = clientRef.current;
       if (!client || !wavStreamPlayer) return;
 
-      // Set instructions
-      client.updateSession({ instructions: instructions });
+      const fetchedInstructions = await getDocContentAsString(
+        conversation_config_file_id,
+        keyfile_json
+      ).catch((error) => {
+        console.error("Failed to fetch instructions from Drive:", error);
+        setInstructionInfo({
+          source: "fallback",
+          text: fallbackInstructions,
+          error: error.message,
+        });
+      });
+
+      fetchedInstructions && setInstructionInfo({
+        source: "google-drive",
+        text: fetchedInstructions,
+      });
 
       // handle realtime events from client + server for event logging
       client.on("error", (event: any) => console.error(event));
@@ -143,7 +177,13 @@ export function App() {
         client.reset();
       };
     }
-  }, [errorMessage]);
+  })()}, [errorMessage]);
+
+  useEffect(() => {
+    // Set instructions
+    const client = clientRef.current;
+    client?.updateSession({ instructions: instructionInfo.text || "" });
+  }, [instructionInfo]);
 
   return (
     <div className="app-container">
@@ -163,6 +203,11 @@ export function App() {
               ? "Connected to:"
               : "Failed to connect to:"}
           </div>
+          { IS_DEBUG && (
+            <div className="status-debug">
+              {instructionInfo?.text?.slice(0, 100)}...
+            </div>
+          ) }
           <div className="status-url">{errorMessage || RELAY_SERVER_URL}</div>
         </div>
       </div>
