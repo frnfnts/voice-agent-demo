@@ -1,5 +1,4 @@
 import { google } from 'googleapis';
-import fs from 'fs';
 
 /**
  * Google ドキュメントの内容を文字列として取得する
@@ -31,3 +30,14 @@ export async function getDocContentAsString(fileId: string, keyFileJson: string)
     throw error;
   }
 }
+
+// // 実行して変数に格納する例
+// (async () => {
+//   // 実行例
+//   const FILE_ID = '1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w';
+//   const KEY_PATH = 'ame-ai-agent.json'
+//   const keyFileJson = fs.readFileSync(KEY_PATH, 'utf8');
+//   const myDocText = await getDocContentAsString(FILE_ID, keyFileJson);
+//   console.log('--- 取得した内容 ---');
+//   console.log(myDocText); // ここで変数として利用可能
+// })();
