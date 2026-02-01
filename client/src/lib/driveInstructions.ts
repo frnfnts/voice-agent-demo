@@ -1,43 +1,40 @@
-import { google } from 'googleapis';
+import fs from 'fs';
+import { JWT } from 'google-auth-library';
 
-/**
- * Google ドキュメントの内容を文字列として取得する
- */
 export async function getDocContentAsString(fileId: string, keyFileJson: string): Promise<string> {
-  const serviceAccount = JSON.parse(keyFileJson);
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: serviceAccount.client_email,
-      private_key: serviceAccount.private_key,
-    },
+  const credentials = JSON.parse(keyFileJson);
+
+  // JWT（サービスアカウント認証）の作成
+  const client = new JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   });
 
-  const drive = google.drive({ version: 'v3', auth });
-
   try {
-    const response = await drive.files.export({
-      fileId: fileId,
-      mimeType: 'text/plain',
+    // 3. アクセストークンの取得
+    const tokenResponse = await client.authorize();
+    const accessToken = tokenResponse.access_token;
+
+    const mimeType = 'text/plain';
+
+    // 4. 標準の fetch を使って Google Drive API を叩く
+    const url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
     });
 
-    // response.data にテキスト内容が文字列として入っています
-    const content = response.data as string;
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Google API Error: ${errorText}`);
+    }
 
-    return content;
-  } catch (error) {
-    console.error('テキスト取得エラー:', error);
-    throw error;
+    return await response.text();
+
+  } catch (error: any) {
+    throw new Error(error.message);
   }
 }
-
-// // 実行して変数に格納する例
-// (async () => {
-//   // 実行例
-//   const FILE_ID = '1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w';
-//   const KEY_PATH = 'ame-ai-agent.json'
-//   const keyFileJson = fs.readFileSync(KEY_PATH, 'utf8');
-//   const myDocText = await getDocContentAsString(FILE_ID, keyFileJson);
-//   console.log('--- 取得した内容 ---');
-//   console.log(myDocText); // ここで変数として利用可能
-// })();
