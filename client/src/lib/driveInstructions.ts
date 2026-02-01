@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { JWT } from 'google-auth-library';
 
 export async function getDocContentAsString(fileId: string, keyFileJson: string): Promise<string> {
