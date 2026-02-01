@@ -11,13 +11,13 @@ export async function getDocContentAsString(fileId: string, keyFileJson: string)
   });
 
   try {
-    // 3. アクセストークンの取得
+    // アクセストークンの取得
     const tokenResponse = await client.authorize();
     const accessToken = tokenResponse.access_token;
 
     const mimeType = 'text/plain';
 
-    // 4. 標準の fetch を使って Google Drive API を叩く
+    // 標準の fetch を使って Google Drive API を叩く
     const url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
 
     const response = await fetch(url, {
