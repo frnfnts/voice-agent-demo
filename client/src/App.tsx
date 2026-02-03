@@ -5,15 +5,11 @@ import { WavRecorder, WavStreamPlayer } from "./lib/wavtools/index.js";
 import {
   fallbackInstructions,
 } from "./conversation_config.js";
-import { getDocContentAsString } from "./lib/driveInstructions";
 import "./App.css";
 
 const clientRef = { current: null as RealtimeClient | null };
 const wavRecorderRef = { current: null as WavRecorder | null };
 const wavStreamPlayerRef = { current: null as WavStreamPlayer | null };
-
-const conversation_config_file_id = import.meta.env.VITE_GDRIVE_INSTRUCTION_FILE_ID ?? "";
-const keyfile_json  = import.meta.env.VITE_KEYFILE_JSON ?? "";
 
 type InstructionInfo = {
   source: "google-drive" | "fallback" | "none";
@@ -31,10 +27,6 @@ export function App() {
   const [instructionInfo, setInstructionInfo] = useState<InstructionInfo>({
     source: "none",
   });
-
-  if (keyfile_json === "" || conversation_config_file_id === "") {
-    throw new Error("Missing required environment variables for Google Drive access");
-  }
 
   if (!clientRef.current) {
     clientRef.current = new RealtimeClient({
@@ -132,9 +124,8 @@ export function App() {
       const client = clientRef.current;
       if (!client || !wavStreamPlayer) return;
 
-      const fetchedInstructions = await getDocContentAsString(
-        conversation_config_file_id,
-        keyfile_json
+      const fetchedInstructions = await fetch(
+        '/get_instructions'
       ).catch((error) => {
         console.error("Failed to fetch instructions from Drive:", error);
         setInstructionInfo({
@@ -146,7 +137,7 @@ export function App() {
 
       fetchedInstructions && setInstructionInfo({
         source: "google-drive",
-        text: fetchedInstructions,
+        text: await fetchedInstructions.text(),
       });
 
       // handle realtime events from client + server for event logging
