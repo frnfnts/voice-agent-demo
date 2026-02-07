@@ -29,6 +29,17 @@ export function App() {
   >("disconnected");
   const [instructionInfo, setInstructionInfo] = useState<InstructionInfo>({
     source: "none",
+    error: (() => {
+        if (!RELAY_SERVER_URL) {
+            return 'Missing required "wss" parameter in URL';
+        }
+        try {
+          new URL(RELAY_SERVER_URL);
+          return;
+        } catch {
+          return 'Invalid URL format for "wss" parameter';
+        }
+      })(),
   });
 
   if (!clientRef.current) {
@@ -104,24 +115,13 @@ export function App() {
     }
   }, []);
 
-  const errorMessage = !RELAY_SERVER_URL
-    ? 'Missing required "wss" parameter in URL'
-    : (() => {
-        try {
-          new URL(RELAY_SERVER_URL);
-          return null;
-        } catch {
-          return 'Invalid URL format for "wss" parameter';
-        }
-      })();
-
   /**
    * Core RealtimeClient and audio capture setup
    * Set all of our instructions, tools, events and more
    */
   useEffect(() => {(async () => {
     // Only run the effect if there's no error
-    if (!errorMessage) {
+    if (!instructionInfo?.error) {
       connectConversation();
       const wavStreamPlayer = wavStreamPlayerRef.current;
       const client = clientRef.current;
@@ -171,7 +171,7 @@ export function App() {
         client.reset();
       };
     }
-  })()}, [errorMessage]);
+  })()}, [instructionInfo?.error]);
 
   useEffect(() => {
     // Set instructions
@@ -184,12 +184,12 @@ export function App() {
       <div className="status-indicator">
         <div
           className={`status-dot ${
-            errorMessage ? "disconnected" : connectionStatus
+            instructionInfo?.error ? "disconnected" : connectionStatus
           }`}
         />
         <div className="status-text">
           <div className="status-label">
-            {errorMessage
+            {instructionInfo?.error
               ? "Error:"
               : connectionStatus === "connecting"
               ? "Connecting to:"
@@ -202,7 +202,7 @@ export function App() {
               {instructionInfo?.text?.slice(0, 100)}...
             </div>
           ) }
-          <div className="status-url">{errorMessage || RELAY_SERVER_URL}</div>
+          <div className="status-url">{instructionInfo?.error || RELAY_SERVER_URL}</div>
         </div>
       </div>
     </div>
