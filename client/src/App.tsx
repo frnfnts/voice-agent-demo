@@ -15,6 +15,7 @@ type InstructionInfo = {
   source: "google-drive" | "fallback" | "none";
   text?: string;
   error?: string;
+  warn?: string;
 };
 
 export function App() {
@@ -130,20 +131,31 @@ export function App() {
       if (!client || !wavStreamPlayer) return;
 
       const fetchedInstructions = await fetch(
-        `${BACKEND_URL}/get-instruction`
+        `${BACKEND_URL}/get-instruction`,
+        {
+          headers: {
+            "content-type": "text/plain",
+            "ngrok-skip-browser-warning": "true",
+          },
+        }
       ).catch((error) => {
         console.error("Failed to fetch instructions from Drive:", error);
         setInstructionInfo({
           source: "fallback",
           text: fallbackInstructions,
+          warn: "Failed to fetch instructions from Drive, using fallback.",
         });
         setDebugLogs((logs) => [...logs, "Using fallback instructions.", error.toString()]);
       });
 
       if (fetchedInstructions) {
+        console.log(fetchedInstructions);
         setInstructionInfo({
           source: "google-drive",
-          text: await fetchedInstructions.text(),
+          text: await fetchedInstructions.body?.getReader().read().then(async ({ value }) => {
+            const decoder = new TextDecoder("utf-8");
+            return decoder.decode(value);
+          }),
         });
         setDebugLogs((logs) => [...logs, "Fetched instructions from Google Drive."]);
       }
@@ -204,14 +216,22 @@ export function App() {
           </div>
           { IS_DEBUG && (<>
             <div className="status-debug">
+              <div>Instruction</div>
               {instructionInfo?.text?.slice(0, 100)}...
             </div>
             <div className="status-debug">
+              <div>Debug Logs</div>
               {debugLogs.map((log, index) => (
                 <div key={index}>{log}</div>
               ))}
             </div>
           </>) }
+          { instructionInfo?.warn && (
+            <div className="status-warn">
+              <div>Warning</div>
+              {instructionInfo.warn}
+            </div>
+          )}
           <div className="status-url">{instructionInfo?.error || RELAY_SERVER_URL}</div>
         </div>
       </div>
