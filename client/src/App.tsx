@@ -197,50 +197,65 @@ export function App() {
     client?.updateSession({ instructions: instructionInfo.text || "" });
   }, [instructionInfo]);
 
-  const showIcon = !instructionInfo?.error && connectionStatus === "connected";
+  const statusClass = instructionInfo?.error ? "error" : connectionStatus;
+  const statusLabel = instructionInfo?.error
+    ? "Error"
+    : connectionStatus === "connecting"
+    ? "Connecting"
+    : connectionStatus === "connected"
+    ? "Connected"
+    : "Disconnected";
+  const instructionLength = instructionInfo?.text?.length || 0;
 
   return (
     <div className="app-container">
-      <div className="status-indicator">
-        {showIcon ? (
-          <img className="status-icon" src={ayaIcon} alt="aya" />
-        ) : (
-          <div
-            className={`status-dot ${
-              instructionInfo?.error ? "disconnected" : connectionStatus
-            }`}
-          />
-        )}
-        <div className="status-text">
-          <div className="status-label">
-            {instructionInfo?.error
-              ? "Error:"
-              : connectionStatus === "connecting"
-              ? "Connecting to:"
-              : connectionStatus === "connected"
-              ? "Connected to:"
-              : "Failed to connect to:"}
-          </div>
-          { IS_DEBUG && (<>
-            <div className="status-debug">
-              <div>Instruction</div>
-              {instructionInfo?.text?.slice(0, 100)}...
-            </div>
-            <div className="status-debug">
-              <div>Debug Logs</div>
-              {debugLogs.map((log, index) => (
-                <div key={index}>{log}</div>
-              ))}
-            </div>
-          </>) }
-          { instructionInfo?.warn && (
-            <div className="status-warn">
-              <div>Warning</div>
-              {instructionInfo.warn}
-            </div>
-          )}
-          <div className="status-url">{instructionInfo?.error || RELAY_SERVER_URL}</div>
+      <div className="status-panel">
+        <div className="icon-status">
+          <img className={`status-icon-large ${statusClass}`} src={ayaIcon} alt="aya" />
+          <div className={`status-state ${statusClass}`}>{statusLabel}</div>
         </div>
+
+        {(instructionInfo?.warn || instructionInfo?.error) && (
+          <div className="message-stack">
+            {instructionInfo?.warn && (
+              <div className="message-box warn">
+                <div className="message-title">Warning</div>
+                <div className="message-body">{instructionInfo.warn}</div>
+              </div>
+            )}
+            {instructionInfo?.error && (
+              <div className="message-box error">
+                <div className="message-title">Error</div>
+                <div className="message-body">{instructionInfo.error}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {IS_DEBUG && (
+          <div className="debug-panel">
+            <div className="debug-title">Debug</div>
+            <div className="debug-grid">
+              <div className="debug-row">
+                <div className="debug-key">instructionSource</div>
+                <div className="debug-value">{instructionInfo?.source}</div>
+              </div>
+            </div>
+            <div className="debug-block">
+              <div className="debug-subtitle">Instruction Preview</div>
+              <div className="debug-mono">
+                {(instructionInfo?.text || "").slice(0, 100)}
+                {instructionLength > 100 ? "..." : ""}
+              </div>
+            </div>
+            <div className="debug-block">
+              <div className="debug-subtitle">Logs</div>
+              <div className="debug-mono">
+                {debugLogs.length ? debugLogs.join("\n") : "(no logs)"}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
