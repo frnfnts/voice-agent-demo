@@ -42,6 +42,8 @@ export function App() {
       })(),
   });
 
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+
   if (!clientRef.current) {
     clientRef.current = new RealtimeClient({
       url: RELAY_SERVER_URL || undefined,
@@ -134,14 +136,15 @@ export function App() {
         setInstructionInfo({
           source: "fallback",
           text: fallbackInstructions,
-          error: error.message,
         });
+        setDebugLogs((logs) => [...logs, "Using fallback instructions."]);
       });
 
       fetchedInstructions && setInstructionInfo({
         source: "google-drive",
         text: await fetchedInstructions.text(),
       });
+      setDebugLogs((logs) => [...logs, "Fetched instructions from Google Drive."]);
 
       // handle realtime events from client + server for event logging
       client.on("error", (event: any) => console.error(event));
@@ -197,11 +200,16 @@ export function App() {
               ? "Connected to:"
               : "Failed to connect to:"}
           </div>
-          { IS_DEBUG && (
+          { IS_DEBUG && (<>
             <div className="status-debug">
               {instructionInfo?.text?.slice(0, 100)}...
             </div>
-          ) }
+            <div className="status-debug">
+              {debugLogs.map((log, index) => (
+                <div key={index}>{log}</div>
+              ))}
+            </div>
+          </>) }
           <div className="status-url">{instructionInfo?.error || RELAY_SERVER_URL}</div>
         </div>
       </div>
