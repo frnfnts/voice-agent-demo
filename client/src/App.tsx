@@ -20,6 +20,9 @@ type InstructionInfo = {
 export function App() {
   const params = new URLSearchParams(window.location.search);
   const RELAY_SERVER_URL = params.get("wss");
+  const BACKEND_URL = RELAY_SERVER_URL
+    ? RELAY_SERVER_URL.replace("wss://", "https://").replace("ws://", "http://")
+    : null;
   const IS_DEBUG = params.get("debug") === "true";
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected"
@@ -125,7 +128,7 @@ export function App() {
       if (!client || !wavStreamPlayer) return;
 
       const fetchedInstructions = await fetch(
-        '/get_instructions'
+        `${BACKEND_URL}/get-instruction`
       ).catch((error) => {
         console.error("Failed to fetch instructions from Drive:", error);
         setInstructionInfo({
