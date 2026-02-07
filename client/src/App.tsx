@@ -6,6 +6,7 @@ import {
   fallbackInstructions,
 } from "./conversation_config.js";
 import "./App.css";
+import ayaIcon from "../aya.png";
 
 const clientRef = { current: null as RealtimeClient | null };
 const wavRecorderRef = { current: null as WavRecorder | null };
@@ -196,14 +197,20 @@ export function App() {
     client?.updateSession({ instructions: instructionInfo.text || "" });
   }, [instructionInfo]);
 
+  const showIcon = !instructionInfo?.error && connectionStatus === "connected";
+
   return (
     <div className="app-container">
       <div className="status-indicator">
-        <div
-          className={`status-dot ${
-            instructionInfo?.error ? "disconnected" : connectionStatus
-          }`}
-        />
+        {showIcon ? (
+          <img className="status-icon" src={ayaIcon} alt="aya" />
+        ) : (
+          <div
+            className={`status-dot ${
+              instructionInfo?.error ? "disconnected" : connectionStatus
+            }`}
+          />
+        )}
         <div className="status-text">
           <div className="status-label">
             {instructionInfo?.error

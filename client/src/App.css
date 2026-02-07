@@ -33,6 +33,15 @@
   flex-shrink: 0;
 }
 
+.status-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
 .status-text,
 .error-text {
   display: flex;
