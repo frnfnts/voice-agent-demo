@@ -137,14 +137,16 @@ export function App() {
           source: "fallback",
           text: fallbackInstructions,
         });
-        setDebugLogs((logs) => [...logs, "Using fallback instructions."]);
+        setDebugLogs((logs) => [...logs, "Using fallback instructions.", error.toString()]);
       });
 
-      fetchedInstructions && setInstructionInfo({
-        source: "google-drive",
-        text: await fetchedInstructions.text(),
-      });
-      setDebugLogs((logs) => [...logs, "Fetched instructions from Google Drive."]);
+      if (fetchedInstructions) {
+        setInstructionInfo({
+          source: "google-drive",
+          text: await fetchedInstructions.text(),
+        });
+        setDebugLogs((logs) => [...logs, "Fetched instructions from Google Drive."]);
+      }
 
       // handle realtime events from client + server for event logging
       client.on("error", (event: any) => console.error(event));
