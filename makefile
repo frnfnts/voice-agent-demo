@@ -15,4 +15,9 @@ front-test:
 join:
 	./join-bot.sh
 
+upload-chat-logs:
+	cd python-server && \
+	python3 upload_logs.py
+# 	python3 upload_logs.py --dry-run
+
 .PHONY: client
