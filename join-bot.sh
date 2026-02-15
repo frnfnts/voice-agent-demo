@@ -4,7 +4,7 @@ export RECALL_TOKEN="${RECALL_TOKEN:-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
 export NGROK_URL="${NGROK_URL:-52.193.78.104:3000}"
 export MEETING_URL="${MEETING_URL:-https://meet.google.com/qgm-dpzi-cwn}"
 export IS_DEBUG="${IS_DEBUG:-false}"
-export SCENARIO="${SCENARIO:-compliance}"
+export SCENARIO="${SCENARIO:-exit_interview}"
 
 
 # NGROK を使う場合は config.url は ws じゃなくて wss にする
