@@ -40,7 +40,7 @@ python3 text_chat.py --mode auto --persona witness_direct --scenario compliance
 ### 会話ログ
 
 - 会話ログは `chat_logs/` に JSON 形式で自動保存されます。
-- `upload_logs.py` を使って Google Drive にアップロードして共有できます。
+- `upload_logs.py` を使って [Google Drive](https://drive.google.com/drive/u/1/folders/1rmeUlt3rjX9RzK9S9FdG1mTx1B-8dpAE) にアップロードして共有できます。
 
 ```bash
 cd python-server
