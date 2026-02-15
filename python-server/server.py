@@ -24,6 +24,7 @@ CORS_ALLOW_ORIGIN = os.getenv("CORS_ALLOW_ORIGIN", "*")
 CORS_ALLOW_METHODS = os.getenv("CORS_ALLOW_METHODS", "GET,POST,OPTIONS")
 CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "Content-Type, Authorization, ngrok-skip-browser-warning")
 INSTRUCTION_DOC_ID = os.getenv("INSTRUCTION_DOC_ID", "1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w")
+COMPLIANCE_INSTRUCTION_DOC_ID = os.getenv("COMPLIANCE_INSTRUCTION_DOC_ID", "1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY must be set in .env file")
@@ -187,12 +188,22 @@ class WebSocketRelay:
 
         return ws
 
+    SCENARIO_INSTRUCTION_DOC_ID = {
+        "exit_interview": INSTRUCTION_DOC_ID,
+        "compliance": COMPLIANCE_INSTRUCTION_DOC_ID,
+    }
+
     async def handle_get_instruction(self, request: web.Request):
+        scenario = request.query.get("scenario", "exit_interview")
         wd = Path(__file__).parent
         service_account_path = wd / "ame-ai-agent.json"
+
+        doc_id = self.SCENARIO_INSTRUCTION_DOC_ID.get(scenario)
+        if not doc_id:
+            return web.Response(status=400, text="Invalid scenario")
         with open(service_account_path, "r", encoding="utf-8") as f:
             sa_info = json.load(f)
-            content = export_doc(INSTRUCTION_DOC_ID, sa_info, "text/plain")
+            content = export_doc(doc_id, sa_info, "text/plain")
         return web.Response(text=content.decode("utf-8"))
 
     async def serve(self):

@@ -4,6 +4,7 @@ export RECALL_TOKEN="${RECALL_TOKEN:-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
 export NGROK_URL="${NGROK_URL:-52.193.78.104:3000}"
 export MEETING_URL="${MEETING_URL:-https://meet.google.com/qgm-dpzi-cwn}"
 export IS_DEBUG="${IS_DEBUG:-false}"
+export SCENARIO="${SCENARIO:-compliance}"
 
 
 # NGROK を使う場合は config.url は ws じゃなくて wss にする
@@ -20,7 +21,7 @@ curl --request POST \
       "camera": {
         "kind": "webpage",
         "config": {
-          "url": "'"${FRONTEND_URL}"'?wss=ws://'"${NGROK_URL}"'&debug='"${IS_DEBUG}"'"
+          "url": "'"${FRONTEND_URL}"'?wss=ws://'"${NGROK_URL}"'&debug='"${IS_DEBUG}"'&scenario='"${SCENARIO}"'"
         }
       }
     },

@@ -26,6 +26,11 @@ export function App() {
     ? RELAY_SERVER_URL.replace("wss://", "https://").replace("ws://", "http://")
     : null;
   const IS_DEBUG = params.get("debug") === "true";
+  const SCENARIO = params.get("scenario") || "exit_interview";
+  const SCENARIO_LABELS: Record<string, string> = {
+    exit_interview: "退職面談",
+    compliance: "コンプライアンス通報受付",
+  };
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >("disconnected");
@@ -97,9 +102,15 @@ export function App() {
 
       // Always use VAD mode
       client.updateSession({
-        turn_detection: { type: "server_vad" },
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.7,              // デフォルト0.5 → 小さな音声・フィラーで誤検出しにくく
+          silence_duration_ms: 1200,    // デフォルト500 → 考え中の沈黙で割り込まない
+          prefix_padding_ms: 500,       // デフォルト300 → 発話開始判定にバッファを持たせる
+        },
         // @ts-ignore  ライブラリが古いので marin が指定できないので無視する
         voice: 'marin',
+        speed: 0.8,
       });
 
       // Check if we're already recording before trying to pause
@@ -132,7 +143,7 @@ export function App() {
       if (!client || !wavStreamPlayer) return;
 
       const fetchedInstructions = await fetch(
-        `${BACKEND_URL}/get-instruction`,
+        `${BACKEND_URL}/get-instruction?scenario=${SCENARIO}`,
         {
           headers: {
             "content-type": "text/plain",
@@ -213,6 +224,7 @@ export function App() {
         <div className="icon-status">
           <img className={`status-icon-large ${statusClass}`} src={ayaIcon} alt="aya" />
           <div className={`status-state ${statusClass}`}>{statusLabel}</div>
+          <div className="scenario-label">{SCENARIO_LABELS[SCENARIO] || SCENARIO}</div>
         </div>
 
         {(instructionInfo?.warn || instructionInfo?.error) && (

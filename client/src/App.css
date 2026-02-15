@@ -85,6 +85,12 @@
   color: #b91c1c;
 }
 
+.scenario-label {
+  font-size: 1.1rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
 .message-stack {
   width: 100%;
   display: flex;
