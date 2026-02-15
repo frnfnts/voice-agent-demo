@@ -1,7 +1,21 @@
 # 使い方
+## 音声エージェント
 
 - `join-bot.sh` の `ngrok_url` と `meeting_url` を自分のものに変更してください。
-- AI の挙動を変更したい場合は、`client/src/conversation_config.ts` ファイルを編集してください。
+- AI の挙動を変更したい場合は、google docs のプロンプトを編集してください。
+  - [退職面談用プロンプト](https://docs.google.com/document/d/1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w/edit?usp=sharing)
+  - [コンプライアンスシナリオ用プロンプト](https://docs.google.com/document/d/17X_7fQzE14K6FFYWj9PQTPFLCHzsfVG8-phoPH-f37g/edit?usp=sharing)
+- 環境変数を設定して、`join-bot.sh` を実行してください。
+
+```bash
+export FRONTEND_URL="https://your-frontend-url.com"
+export RECALL_TOKEN="your_recall_token"
+export NGROK_URL="your_ngrok_url:port"
+export SCENARIO="exit_interview" # exit_interview または compliance を指定可能
+export MEETING_URL="your_meeting_url"
+export IS_DEBUG="true" # デバッグモードを有効にする場合は true
+bash join-bot.sh
+```
 
 # 注意点等
 
@@ -9,6 +23,29 @@
 - 本番環境では、`ws://` の代わりに `wss://` を使用することが推奨されます。
 - フロントエンドは、変更が `main` ブランチにプッシュされると、自動的に個人の Cloudflare Pages にデプロイされます。
 
+## テキストチャット版
+
+`text_chat.py` — テキストベースの面談テスト CLI です。音声パイプラインを使わずにプロンプトを高速検証できます。
+
+### 使い方
+
+```bash
+cd python-server
+python3 text_chat.py --mode auto --persona witness_direct --scenario compliance
+```
+
+- `--persona` で面談者のペルソナ、`--scenario` でシナリオを指定します。
+- プロンプトは `python-server/` ディレクトリにあるテキストファイル（`prompt.txt`, `prompt_compliance.txt` など）を使用します。ローカルで編集してテストを繰り返し、最終的に Google Docs にペーストする使い方を想定しています。
+
+### 会話ログ
+
+- 会話ログは `chat_logs/` に JSON 形式で自動保存されます。
+- `upload_logs.py` を使って Google Drive にアップロードして共有できます。
+
+```bash
+cd python-server
+python3 upload_logs.py
+```
 
 ----- ↓ ここから original README.md -----
 # Recall.ai Real-Time Voice Agent
