@@ -274,10 +274,10 @@ export function App() {
   const stepLabels = STEP_LABELS[SCENARIO] || STEP_LABELS.exit_interview;
 
   return (
-    <div className="app-container">
-      <div className="status-panel">
+    <div className={`app-container${IS_DEBUG ? ' debug' : ''}`}>
+      <div className={`status-panel${IS_DEBUG ? ' debug' : ''}`}>
         <div className="icon-status">
-          <img className={`status-icon-large ${statusClass}`} src={ayaIcon} alt="aya" />
+          <img className={`status-icon-large ${statusClass}${IS_DEBUG ? ' debug' : ''}`} src={ayaIcon} alt="aya" />
           <div className={`status-state ${statusClass}`}>{statusLabel}</div>
           <div className="scenario-label">{SCENARIO_LABELS[SCENARIO] || SCENARIO}</div>
         </div>
