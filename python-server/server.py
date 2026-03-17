@@ -10,6 +10,13 @@ from aiohttp import web, WSMsgType
 from google_drive_docs_export import export_doc
 from pathlib import Path
 
+from langchain_core.messages import AIMessage, HumanMessage
+from interview_graph import (
+    InterviewState,
+    build_exit_interview_graph,
+    build_compliance_graph,
+)
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -110,10 +117,52 @@ async def connect_to_openai():
         raise
 
 
+class InterviewSession:
+    """1 つの WebSocket 接続に対応する面談セッション."""
+
+    def __init__(self, scenario: str, full_prompt: str):
+        self.scenario = scenario
+        self.full_prompt = full_prompt
+
+        if scenario == "compliance":
+            self.graph = build_compliance_graph(full_prompt)
+        else:
+            self.graph = build_exit_interview_graph(full_prompt)
+
+        self.state: InterviewState = {
+            "current_step": 0,
+            "messages": [],
+            "deep_dive_count": 0,
+            "step_summaries": {},
+            "is_complete": False,
+        }
+
+    async def process_user_message(self, text: str) -> dict:
+        """ユーザー発話を受け取り、Graph を1ステップ実行して更新後の state snippet を返す."""
+        self.state["messages"] = list(self.state["messages"]) + [
+            HumanMessage(content=text)
+        ]
+
+        result = await self.graph.ainvoke(self.state)
+        self.state = result
+        return self.get_status()
+
+    def get_status(self) -> dict:
+        """デバッグ用のステータス情報を返す."""
+        return {
+            "type": "interview.state",
+            "current_step": self.state["current_step"],
+            "deep_dive_count": self.state["deep_dive_count"],
+            "is_complete": self.state["is_complete"],
+            "step_summaries": self.state.get("step_summaries", {}),
+        }
+
+
 class WebSocketRelay:
     def __init__(self):
         """Initialize the WebSocket relay server."""
         self.connections = {}
+        self.sessions: dict[web.WebSocketResponse, InterviewSession] = {}
 
     async def handle_browser_connection(self, request: web.Request):
         """Handle a WebSocket connection from the browser."""
@@ -126,6 +175,11 @@ class WebSocketRelay:
         logger.info(f"Browser connected from {request.remote}")
         openai_ws = None
 
+        # URL パラメータからシナリオと debug を取得
+        scenario = request.query.get("scenario", "exit_interview")
+        is_debug = request.query.get("debug", "").lower() == "true"
+        session: InterviewSession | None = None
+
         try:
             # Connect to OpenAI
             openai_ws, session_created = await connect_to_openai()
@@ -137,6 +191,7 @@ class WebSocketRelay:
             logger.info("Forwarded session.created to browser")
 
             async def handle_browser_messages():
+                nonlocal session
                 async for msg in ws:
                     if msg.type == WSMsgType.TEXT:
                         message = msg.data
@@ -145,6 +200,20 @@ class WebSocketRelay:
                             logger.info(f'Relaying "{event.get("type")}" to OpenAI')
                             debug_log_event("Browser -> OpenAI", event)
                             await openai_ws.send(message)
+
+                            # session.update にプロンプトが含まれる場合、セッション初期化
+                            if (
+                                event.get("type") == "session.update"
+                                and event.get("session", {}).get("instructions")
+                                and session is None
+                            ):
+                                full_prompt = event["session"]["instructions"]
+                                session = InterviewSession(scenario, full_prompt)
+                                self.sessions[ws] = session
+                                logger.info(f"InterviewSession created for scenario={scenario}")
+                                if is_debug:
+                                    await ws.send_str(json.dumps(session.get_status()))
+
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from browser: {message}")
                     elif msg.type == WSMsgType.ERROR:
@@ -161,6 +230,20 @@ class WebSocketRelay:
                             )
                             debug_log_event("OpenAI -> Browser", event)
                             await ws.send_str(message)
+
+                            # 完了した会話アイテムのトランスクリプトを LangGraph に通知
+                            if (
+                                session
+                                and event.get("type") == "conversation.item.input_audio_transcription.completed"
+                            ):
+                                transcript = event.get("transcript", "").strip()
+                                if transcript:
+                                    logger.info(f"User transcript: {transcript[:80]}")
+                                    status = await session.process_user_message(transcript)
+                                    logger.info(f"Interview state: step={status['current_step']}, done={status['is_complete']}")
+                                    if is_debug:
+                                        await ws.send_str(json.dumps(status))
+
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from OpenAI: {message}")
                 except websockets.exceptions.ConnectionClosed as e:
@@ -179,6 +262,8 @@ class WebSocketRelay:
         except Exception as e:
             logger.error(f"Error handling connection: {str(e)}")
         finally:
+            if ws in self.sessions:
+                del self.sessions[ws]
             if ws in self.connections:
                 if openai_ws and not openai_ws.closed:
                     await openai_ws.close(1000, "Normal closure")

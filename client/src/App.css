@@ -182,6 +182,45 @@
   border: 1px solid #e2e8f0;
 }
 
+/* ── Step Indicator (debug mode) ── */
+.step-indicator {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.step-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 1.6rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.step-num {
+  font-weight: 700;
+  font-size: 1.5rem;
+}
+
+.step-chip.step-done {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.step-chip.step-active {
+  background: #3b82f6;
+  color: white;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.step-chip.step-pending {
+  background: #e2e8f0;
+  color: #94a3b8;
+}
+
 @keyframes pulse {
   0% {
     opacity: 1;

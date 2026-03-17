@@ -19,6 +19,13 @@ type InstructionInfo = {
   warn?: string;
 };
 
+type InterviewStepState = {
+  current_step: number;
+  deep_dive_count: number;
+  is_complete: boolean;
+  step_summaries: Record<number, string>;
+};
+
 export function App() {
   const params = new URLSearchParams(window.location.search);
   const RELAY_SERVER_URL = params.get("wss");
@@ -50,6 +57,7 @@ export function App() {
   });
 
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [interviewState, setInterviewState] = useState<InterviewStepState | null>(null);
 
   if (!clientRef.current) {
     clientRef.current = new RealtimeClient({
@@ -172,7 +180,6 @@ export function App() {
         setDebugLogs((logs) => [...logs, "Fetched instructions from Google Drive."]);
       }
 
-      // handle realtime events from client + server for event logging
       client.on("error", (event: any) => console.error(event));
       client.on("conversation.interrupted", async () => {
         const trackSampleOffset = await wavStreamPlayer.interrupt();
@@ -196,6 +203,32 @@ export function App() {
         }
       });
 
+      // LangGraph interview state events (debug mode only)
+      if (IS_DEBUG) {
+        // Listen for raw WebSocket messages for interview.state
+        if (client.realtime.ws) {
+          const origHandler = client.realtime.ws.onmessage;
+          client.realtime.ws.onmessage = (ev: MessageEvent) => {
+            try {
+              const data = JSON.parse(ev.data);
+              if (data.type === "interview.state") {
+                setInterviewState(data);
+                setDebugLogs((logs) => [
+                  ...logs,
+                  `Step ${data.current_step} | dive=${data.deep_dive_count} | done=${data.is_complete}`,
+                ]);
+              }
+            } catch {
+              // not JSON or not our event, ignore
+            }
+            // Call original handler
+            if (origHandler) {
+              origHandler.call(client.realtime.ws, ev);
+            }
+          };
+        }
+      }
+
       return () => {
         client.reset();
       };
@@ -217,6 +250,28 @@ export function App() {
     ? "Connected"
     : "Disconnected";
   const instructionLength = instructionInfo?.text?.length || 0;
+
+  const STEP_LABELS: Record<string, string[]> = {
+    exit_interview: [
+      "趣旨説明",
+      "入社理由",
+      "ギャップ",
+      "きっかけ",
+      "決め手",
+      "改善可能性",
+      "終了",
+    ],
+    compliance: [
+      "趣旨説明",
+      "概要把握",
+      "5W1H",
+      "証拠確認",
+      "影響範囲",
+      "希望・懸念",
+      "終了",
+    ],
+  };
+  const stepLabels = STEP_LABELS[SCENARIO] || STEP_LABELS.exit_interview;
 
   return (
     <div className="app-container">
@@ -247,6 +302,32 @@ export function App() {
         {IS_DEBUG && (
           <div className="debug-panel">
             <div className="debug-title">Debug</div>
+
+            {interviewState && (
+              <div className="debug-block">
+                <div className="debug-subtitle">Interview Progress</div>
+                <div className="step-indicator">
+                  {stepLabels.map((label, i) => {
+                    const current = interviewState.current_step;
+                    const cls =
+                      i < current
+                        ? "step-done"
+                        : i === current
+                        ? "step-active"
+                        : "step-pending";
+                    return (
+                      <div key={i} className={`step-chip ${cls}`}>
+                        <span className="step-num">{i}</span>
+                        <span className="step-label">{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="debug-mono" style={{ marginTop: 4 }}>
+                  deep_dive: {interviewState.deep_dive_count} | complete: {String(interviewState.is_complete)}
+                </div>
+              </div>
+            )}
             <div className="debug-grid">
               <div className="debug-row">
                 <div className="debug-key">instructionSource</div>
