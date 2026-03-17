@@ -229,6 +229,11 @@ export function App() {
                 ]);
               }
             } catch {
+              console.warn("Received non-JSON message, ignoring");
+              setInstructionInfo((info) => ({
+                ...info,
+                warn: "Received non-JSON message from server, ignoring.",
+              }));
               // not JSON or not our event, ignore
             }
           });
