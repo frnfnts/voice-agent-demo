@@ -9,12 +9,14 @@ from websockets.legacy.client import connect
 from aiohttp import web, WSMsgType
 from google_drive_docs_export import export_doc
 from pathlib import Path
+from collections import Counter
 
 from langchain_core.messages import AIMessage, HumanMessage
 from interview_graph import (
     InterviewState,
-    build_exit_interview_graph,
-    build_compliance_graph,
+    EXIT_INTERVIEW_STEPS,
+    COMPLIANCE_STEPS,
+    should_advance,
 )
 
 logging.basicConfig(
@@ -33,6 +35,8 @@ CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "Content-Type, Authorizatio
 INSTRUCTION_DOC_ID = os.getenv("INSTRUCTION_DOC_ID", "1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w")
 COMPLIANCE_INSTRUCTION_DOC_ID = os.getenv("COMPLIANCE_INSTRUCTION_DOC_ID", "17X_7fQzE14K6FFYWj9PQTPFLCHzsfVG8-phoPH-f37g")
 
+logger.setLevel("DEBUG" if DEBUG_ENABLED else "INFO")
+
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY must be set in .env file")
 
@@ -47,11 +51,17 @@ def debug_log_event(message: str, event: dict):
     # audio と session.instructions の場合は100文字に切り詰める
     if "audio" in truncated and isinstance(truncated["audio"], str) and len(truncated["audio"]) > 100:
         truncated["audio"] = truncated["audio"][:100] + "..."
+        if Counter(truncated["audio"])["A"] > 80:
+            return
     if "session" in truncated and isinstance(truncated.get("session"), dict):
         if "instructions" in truncated["session"] and isinstance(truncated["session"]["instructions"], str) and len(truncated["session"]["instructions"]) > 100:
             truncated["session"]["instructions"] = truncated["session"]["instructions"][:100] + "..."
+    if "delta" in truncated and isinstance(truncated.get("delta"), str) and len(truncated["delta"]) > 100:
+        truncated["delta"] = truncated["delta"][:100] + "..."
+    if event.get("type") == "response.audio_transcript.delta":
+        return
 
-    logger.debug(f"{message}: {json.dumps(truncated, indent=2)}")
+    logger.debug(f"{message}: {json.dumps(truncated, indent=2, ensure_ascii=False)}")
 
 
 @web.middleware
@@ -100,6 +110,9 @@ async def connect_to_openai():
                     "output_audio_format": "pcm16",
                     "modalities": ["text", "audio"],
                     "voice": "alloy",
+                    "input_audio_transcription": {
+                        "model": "gpt-4o-mini-transcribe",
+                    },
                 },
             }
             await ws.send(json.dumps(update_session))
@@ -117,6 +130,10 @@ async def connect_to_openai():
         raise
 
 
+# ステップ数の上限（closing ステップ）
+_MAX_STEP = 6
+
+
 class InterviewSession:
     """1 つの WebSocket 接続に対応する面談セッション."""
 
@@ -124,10 +141,10 @@ class InterviewSession:
         self.scenario = scenario
         self.full_prompt = full_prompt
 
-        if scenario == "compliance":
-            self.graph = build_compliance_graph(full_prompt)
-        else:
-            self.graph = build_exit_interview_graph(full_prompt)
+        steps = COMPLIANCE_STEPS if scenario == "compliance" else EXIT_INTERVIEW_STEPS
+        self.step_purposes: dict[int, str] = {
+            k: v["purpose"] for k, v in steps.items()
+        }
 
         self.state: InterviewState = {
             "current_step": 0,
@@ -138,13 +155,28 @@ class InterviewSession:
         }
 
     async def process_user_message(self, text: str) -> dict:
-        """ユーザー発話を受け取り、Graph を1ステップ実行して更新後の state snippet を返す."""
-        self.state["messages"] = list(self.state["messages"]) + [
-            HumanMessage(content=text)
-        ]
+        """ユーザー発話を会話履歴に追加する（遷移判定は行わない）."""
+        self.state["messages"].append(HumanMessage(content=text))
+        return self.get_status()
 
-        result = await self.graph.ainvoke(self.state)
-        self.state = result
+    async def process_ai_message(self, text: str) -> dict:
+        """AI 発話を会話履歴に追加し、ステップ遷移を判定する."""
+        self.state["messages"].append(AIMessage(content=text))
+
+        if self.state["is_complete"]:
+            return self.get_status()
+
+        decision = await should_advance(self.state, self.step_purposes)
+
+        if decision == "advance":
+            next_step = self.state["current_step"] + 1
+            self.state["current_step"] = min(next_step, _MAX_STEP)
+            self.state["deep_dive_count"] = 0
+            if self.state["current_step"] >= _MAX_STEP:
+                self.state["is_complete"] = True
+        else:
+            self.state["deep_dive_count"] += 1
+
         return self.get_status()
 
     def get_status(self) -> dict:
@@ -156,6 +188,28 @@ class InterviewSession:
             "is_complete": self.state["is_complete"],
             "step_summaries": self.state.get("step_summaries", {}),
         }
+
+
+async def _process_ai_transcript(
+    session: InterviewSession,
+    transcript: str,
+    ws: web.WebSocketResponse,
+    is_debug: bool,
+) -> None:
+    """AI トランスクリプトをバックグラウンドで処理する.
+
+    グラフ実行中に例外が発生してもリレーループを巻き込まないよう
+    ここで例外をキャッチしてログに残す。
+    """
+    try:
+        status = await session.process_ai_message(transcript)
+        logger.info(
+            f"Interview state (AI): step={status['current_step']}, done={status['is_complete']}"
+        )
+        if is_debug and not ws.closed:
+            await ws.send_str(json.dumps(status, ensure_ascii=False))
+    except Exception:
+        logger.exception("Error processing AI transcript in graph")
 
 
 class WebSocketRelay:
@@ -172,13 +226,13 @@ class WebSocketRelay:
         ws = web.WebSocketResponse(protocols=("realtime",))
         await ws.prepare(request)
 
+        # scenario と is_debug は session.update の instructions (JSON) から取得する
+        scenario = "exit_interview"
+        is_debug = False
+        session: InterviewSession | None = None
+
         logger.info(f"Browser connected from {request.remote}")
         openai_ws = None
-
-        # URL パラメータからシナリオと debug を取得
-        scenario = request.query.get("scenario", "exit_interview")
-        is_debug = request.query.get("debug", "").lower() == "true"
-        session: InterviewSession | None = None
 
         try:
             # Connect to OpenAI
@@ -191,7 +245,7 @@ class WebSocketRelay:
             logger.info("Forwarded session.created to browser")
 
             async def handle_browser_messages():
-                nonlocal session
+                nonlocal session, scenario, is_debug
                 async for msg in ws:
                     if msg.type == WSMsgType.TEXT:
                         message = msg.data
@@ -199,7 +253,6 @@ class WebSocketRelay:
                             event = json.loads(message)
                             logger.info(f'Relaying "{event.get("type")}" to OpenAI')
                             debug_log_event("Browser -> OpenAI", event)
-                            await openai_ws.send(message)
 
                             # session.update にプロンプトが含まれる場合、セッション初期化
                             if (
@@ -207,12 +260,26 @@ class WebSocketRelay:
                                 and event.get("session", {}).get("instructions")
                                 and session is None
                             ):
-                                full_prompt = event["session"]["instructions"]
+                                raw = event["session"]["instructions"]
+                                try:
+                                    payload = json.loads(raw)
+                                    full_prompt = payload.get("instruction", raw)
+                                    scenario = payload.get("scenario", scenario)
+                                    is_debug = bool(payload.get("is_debug", is_debug))
+                                except (json.JSONDecodeError, TypeError):
+                                    full_prompt = raw
+
+                                # OpenAI に送る instructions は instruction テキストのみにする
+                                event["session"]["instructions"] = full_prompt
+                                message = json.dumps(event)
+
                                 session = InterviewSession(scenario, full_prompt)
                                 self.sessions[ws] = session
-                                logger.info(f"InterviewSession created for scenario={scenario}")
+                                logger.info(f"InterviewSession created for scenario={scenario}, debug={is_debug}")
                                 if is_debug:
                                     await ws.send_str(json.dumps(session.get_status()))
+
+                            await openai_ws.send(message)
 
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from browser: {message}")
@@ -231,7 +298,7 @@ class WebSocketRelay:
                             debug_log_event("OpenAI -> Browser", event)
                             await ws.send_str(message)
 
-                            # 完了した会話アイテムのトランスクリプトを LangGraph に通知
+                            # ユーザーの音声入力トランスクリプト → 会話履歴に追加
                             if (
                                 session
                                 and event.get("type") == "conversation.item.input_audio_transcription.completed"
@@ -239,10 +306,29 @@ class WebSocketRelay:
                                 transcript = event.get("transcript", "").strip()
                                 if transcript:
                                     logger.info(f"User transcript: {transcript[:80]}")
-                                    status = await session.process_user_message(transcript)
-                                    logger.info(f"Interview state: step={status['current_step']}, done={status['is_complete']}")
-                                    if is_debug:
-                                        await ws.send_str(json.dumps(status))
+                                    try:
+                                        status = await session.process_user_message(transcript)
+                                        logger.info(f"Interview state (user): step={status['current_step']}")
+                                        if is_debug:
+                                            await ws.send_str(json.dumps(status, ensure_ascii=False))
+                                    except Exception:
+                                        logger.exception("Error processing user transcript")
+
+                            # AI の音声応答トランスクリプト → 会話履歴に追加 + ステップ遷移判定
+                            # グラフ実行は重い（複数 LLM 呼び出し）ためバックグラウンドで実行し
+                            # リレーループをブロックしない
+                            if (
+                                session
+                                and event.get("type") == "response.audio_transcript.done"
+                            ):
+                                transcript = event.get("transcript", "").strip()
+                                if transcript:
+                                    logger.info(f"AI transcript: {transcript[:80]}")
+                                    asyncio.create_task(
+                                        _process_ai_transcript(
+                                            session, transcript, ws, is_debug
+                                        )
+                                    )
 
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from OpenAI: {message}")

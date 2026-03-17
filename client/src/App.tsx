@@ -60,14 +60,8 @@ export function App() {
   const [interviewState, setInterviewState] = useState<InterviewStepState | null>(null);
 
   if (!clientRef.current) {
-    // scenario と debug を WebSocket URL に付加してサーバーに渡す
-    let wsUrl = RELAY_SERVER_URL || undefined;
-    if (wsUrl) {
-      const sep = wsUrl.includes("?") ? "&" : "?";
-      wsUrl = `${wsUrl}${sep}scenario=${encodeURIComponent(SCENARIO)}&debug=${IS_DEBUG}`;
-    }
     clientRef.current = new RealtimeClient({
-      url: wsUrl,
+      url: RELAY_SERVER_URL || undefined,
     });
   }
   if (!wavRecorderRef.current) {
@@ -248,9 +242,14 @@ export function App() {
   })()}, [instructionInfo?.error]);
 
   useEffect(() => {
-    // Set instructions
+    // Set instructions as JSON containing instruction, scenario, is_debug
     const client = clientRef.current;
-    client?.updateSession({ instructions: instructionInfo.text || "" });
+    const payload = JSON.stringify({
+      instruction: instructionInfo.text || "",
+      scenario: SCENARIO,
+      is_debug: IS_DEBUG,
+    });
+    client?.updateSession({ instructions: payload });
   }, [instructionInfo]);
 
   const statusClass = instructionInfo?.error ? "error" : connectionStatus;
