@@ -60,8 +60,14 @@ export function App() {
   const [interviewState, setInterviewState] = useState<InterviewStepState | null>(null);
 
   if (!clientRef.current) {
+    // scenario と debug を WebSocket URL に付加してサーバーに渡す
+    let wsUrl = RELAY_SERVER_URL || undefined;
+    if (wsUrl) {
+      const sep = wsUrl.includes("?") ? "&" : "?";
+      wsUrl = `${wsUrl}${sep}scenario=${encodeURIComponent(SCENARIO)}&debug=${IS_DEBUG}`;
+    }
     clientRef.current = new RealtimeClient({
-      url: RELAY_SERVER_URL || undefined,
+      url: wsUrl,
     });
   }
   if (!wavRecorderRef.current) {
@@ -205,10 +211,14 @@ export function App() {
 
       // LangGraph interview state events (debug mode only)
       if (IS_DEBUG) {
-        // Listen for raw WebSocket messages for interview.state
-        if (client.realtime.ws) {
-          const origHandler = client.realtime.ws.onmessage;
-          client.realtime.ws.onmessage = (ev: MessageEvent) => {
+        // ws が確立されるまで待ってから addEventListener で受信する
+        const waitForWs = () => {
+          const ws = client.realtime.ws as WebSocket | undefined;
+          if (!ws) {
+            setTimeout(waitForWs, 100);
+            return;
+          }
+          ws.addEventListener("message", (ev: MessageEvent) => {
             try {
               const data = JSON.parse(ev.data);
               if (data.type === "interview.state") {
@@ -221,12 +231,9 @@ export function App() {
             } catch {
               // not JSON or not our event, ignore
             }
-            // Call original handler
-            if (origHandler) {
-              origHandler.call(client.realtime.ws, ev);
-            }
-          };
-        }
+          });
+        };
+        waitForWs();
       }
 
       return () => {
@@ -302,32 +309,29 @@ export function App() {
         {IS_DEBUG && (
           <div className="debug-panel">
             <div className="debug-title">Debug</div>
-
-            {interviewState && (
-              <div className="debug-block">
-                <div className="debug-subtitle">Interview Progress</div>
-                <div className="step-indicator">
-                  {stepLabels.map((label, i) => {
-                    const current = interviewState.current_step;
-                    const cls =
-                      i < current
-                        ? "step-done"
-                        : i === current
-                        ? "step-active"
-                        : "step-pending";
-                    return (
-                      <div key={i} className={`step-chip ${cls}`}>
-                        <span className="step-num">{i}</span>
-                        <span className="step-label">{label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="debug-mono" style={{ marginTop: 4 }}>
-                  deep_dive: {interviewState.deep_dive_count} | complete: {String(interviewState.is_complete)}
-                </div>
+            <div className="debug-block">
+              <div className="debug-subtitle">Interview Progress</div>
+              <div className="step-indicator">
+                {stepLabels.map((label, i) => {
+                  const current = interviewState?.current_step;
+                  const cls =
+                    i < (current || 0)
+                      ? "step-done"
+                      : i === (current || 0)
+                      ? "step-active"
+                      : "step-pending";
+                  return (
+                    <div key={i} className={`step-chip ${cls}`}>
+                      <span className="step-num">{i}</span>
+                      <span className="step-label">{label}</span>
+                    </div>
+                  );
+                })}
               </div>
-            )}
+              <div className="debug-mono" style={{ marginTop: 4 }}>
+                deep_dive: {interviewState?.deep_dive_count} | complete: {String(interviewState?.is_complete)}
+              </div>
+            </div>
             <div className="debug-grid">
               <div className="debug-row">
                 <div className="debug-key">instructionSource</div>
