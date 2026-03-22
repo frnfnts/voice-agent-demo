@@ -108,6 +108,19 @@ export function App() {
         },
       ]);
 
+      // Always use VAD mode
+      client.updateSession({
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.7,              // デフォルト0.5 → 小さな音声・フィラーで誤検出しにくく
+          silence_duration_ms: 1200,    // デフォルト500 → 考え中の沈黙で割り込まない
+          prefix_padding_ms: 500,       // デフォルト300 → 発話開始判定にバッファを持たせる
+        },
+        // @ts-ignore  ライブラリが古いので marin が指定できないので無視する
+        voice: 'marin',
+        speed: 0.8,
+      });
+
       // Check if we're already recording before trying to pause
       if (wavRecorder.recording) {
         await wavRecorder.pause();
@@ -236,19 +249,7 @@ export function App() {
       scenario: SCENARIO,
       is_debug: IS_DEBUG,
     });
-    client?.updateSession({
-      instructions: payload,
-      turn_detection: {
-        type: "server_vad",
-        threshold: 0.7,              // デフォルト0.5 → 小さな音声・フィラーで誤検出しにくく
-        silence_duration_ms: 1200,    // デフォルト500 → 考え中の沈黙で割り込まない
-        prefix_padding_ms: 500,       // デフォルト300 → 発話開始判定にバッファを持たせる
-      },
-      // @ts-ignore  ライブラリが古いので marin が指定できないので無視する
-      voice: 'marin',
-      speed: 0.8,
-    });
-
+    client?.updateSession({ instructions: payload });
   }, [instructionInfo]);
 
   const statusClass = instructionInfo?.error ? "error" : connectionStatus;
