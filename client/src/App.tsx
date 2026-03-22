@@ -240,15 +240,20 @@ export function App() {
     });
     client?.updateSession({
       instructions: payload,
+      modalities: ["text", "audio"],
+      // @ts-ignore
+      voice: 'marin',
+      speed: 0.9,
       turn_detection: {
         type: "server_vad",
         threshold: 0.7,
         silence_duration_ms: 1200,
         prefix_padding_ms: 500,
       },
+      input_audio_transcription: {
       // @ts-ignore
-      voice: 'marin',
-      speed: 0.8,
+        model: "gpt-4o-mini-transcribe",
+      },
     });
   }, [instructionInfo]);
 
