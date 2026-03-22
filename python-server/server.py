@@ -12,16 +12,29 @@ from pathlib import Path
 from collections import Counter
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import MemorySaver
 from interview_graph import (
     InterviewState,
+    build_exit_interview_graph,
+    build_compliance_graph,
+    build_test_graph,
     EXIT_INTERVIEW_STEPS,
     COMPLIANCE_STEPS,
-    should_advance,
+    TEST_STEPS,
 )
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+LOG_FMT = "%(asctime)s - %(levelname)s - %(message)s"
+
+# stdout ハンドラ
+_stream_handler = logging.StreamHandler()
+_stream_handler.setFormatter(logging.Formatter(LOG_FMT))
+
+# ファイルハンドラ (python-server/server.log)
+_log_path = Path(__file__).parent / "server.log"
+_file_handler = logging.FileHandler(_log_path, encoding="utf-8")
+_file_handler.setFormatter(logging.Formatter(LOG_FMT))
+
+logging.basicConfig(level=logging.INFO, handlers=[_stream_handler, _file_handler])
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -35,7 +48,8 @@ CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "Content-Type, Authorizatio
 INSTRUCTION_DOC_ID = os.getenv("INSTRUCTION_DOC_ID", "1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w")
 COMPLIANCE_INSTRUCTION_DOC_ID = os.getenv("COMPLIANCE_INSTRUCTION_DOC_ID", "17X_7fQzE14K6FFYWj9PQTPFLCHzsfVG8-phoPH-f37g")
 
-logger.setLevel("DEBUG" if DEBUG_ENABLED else "INFO")
+# logger.setLevel("DEBUG" if DEBUG_ENABLED else "INFO")
+logger.setLevel("INFO")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY must be set in .env file")
@@ -93,7 +107,7 @@ async def connect_to_openai():
             },
             subprotocols=["realtime"],
         )
-        logger.info("Successfully connected to OpenAI")
+        logger.debug("Successfully connected to OpenAI")
 
         response = await ws.recv()
         try:
@@ -101,7 +115,7 @@ async def connect_to_openai():
             if event.get("type") != "session.created":
                 logger.error(f"Unexpected event type: {event}")
                 raise Exception(f"Expected session.created, got {event.get('type')}")
-            logger.info("Received session.created response")
+            logger.debug("Received session.created response")
 
             update_session = {
                 "type": "session.update",
@@ -110,7 +124,7 @@ async def connect_to_openai():
                     "output_audio_format": "pcm16",
                     "modalities": ["text", "audio"],
                     "voice": "marin",
-                    "speed": 0.8,
+                    "speed": 0.9,
                     "turn_detection": {
                         "type": "server_vad",
                         "threshold": 0.7,
@@ -123,7 +137,7 @@ async def connect_to_openai():
                 },
             }
             await ws.send(json.dumps(update_session))
-            logger.info("Sent session.create message")
+            logger.debug("Sent session.create message")
 
             return (
                 ws,
@@ -137,65 +151,117 @@ async def connect_to_openai():
         raise
 
 
-# ステップ数の上限（closing ステップ）
-_MAX_STEP = 6
-
-
 class InterviewSession:
-    """1 つの WebSocket 接続に対応する面談セッション."""
+    """1 つの WebSocket 接続に対応する面談セッション.
 
-    def __init__(self, scenario: str, full_prompt: str):
+    LangGraph の StateGraph + MemorySaver でステップ遷移を管理する。
+    ask ノードの interrupt_after でグラフを一時停止し、
+    新しいメッセージが入ったら resume して遷移判定を行う。
+    """
+
+    def __init__(self, scenario: str):
         self.scenario = scenario
-        self.full_prompt = full_prompt
+        self._lock = asyncio.Lock()
 
-        steps = COMPLIANCE_STEPS if scenario == "compliance" else EXIT_INTERVIEW_STEPS
-        self.step_purposes: dict[int, str] = {
-            k: v["purpose"] for k, v in steps.items()
-        }
+        if scenario == "compliance":
+            graph_builder = build_compliance_graph()
+            self.step_definitions = COMPLIANCE_STEPS
+        elif scenario == "test":
+            graph_builder = build_test_graph()
+            self.step_definitions = TEST_STEPS
+        else:
+            graph_builder = build_exit_interview_graph()
+            self.step_definitions = EXIT_INTERVIEW_STEPS
 
-        self.state: InterviewState = {
+        memory = MemorySaver()
+        self.graph = graph_builder.compile(
+            checkpointer=memory,
+            interrupt_after=["ask"],
+        )
+        self.config = {"configurable": {"thread_id": "1"}}
+
+    def get_step_instruction(self, step: int) -> str:
+        """指定ステップの instruction テキストを返す."""
+        step_def = self.step_definitions.get(step, {})
+        return step_def.get("instruction", "")
+
+    async def initialize(self):
+        """グラフを初期状態で起動し step_0 で待機する."""
+        initial_state: InterviewState = {
             "current_step": 0,
             "messages": [],
             "deep_dive_count": 0,
+            "deep_dive_reason": "",
             "step_summaries": {},
             "is_complete": False,
         }
+        await self.graph.ainvoke(initial_state, self.config)
+        logger.info("InterviewSession graph initialized at step_0")
 
     async def process_user_message(self, text: str) -> dict:
         """ユーザー発話を会話履歴に追加する（遷移判定は行わない）."""
-        self.state["messages"].append(HumanMessage(content=text))
-        logger.info(f"Appended user message to history: {text[:80]}")
+        self.graph.update_state(
+            self.config,
+            {"messages": [HumanMessage(content=text)]},
+        )
+        logger.info(f"Appended user message to graph state: {text[:80]}")
         return self.get_status()
 
     async def process_ai_message(self, text: str) -> dict:
-        """AI 発話を会話履歴に追加し、ステップ遷移を判定する."""
-        self.state["messages"].append(AIMessage(content=text))
-        logger.info(f"Appended AI message to history: {text[:80]}")
+        """​AI 発話を会話履歴に追加し、グラフを resume してステップ遷移を判定する.
 
-        if self.state["is_complete"]:
-            return self.get_status()
+        返却 dict に遷移情報を追加:
+        - transition: "advance" | "stay" | "none"
+        - step_instruction: ADVANCE 時は新ステップの instruction
+        - deep_dive_reason: STAY 時の深掘り理由
+        """
+        async with self._lock:
+            self.graph.update_state(
+                self.config,
+                {"messages": [AIMessage(content=text)]},
+            )
+            logger.info(f"Appended AI message to graph state: {text[:80]}")
 
-        decision = await should_advance(self.state, self.step_purposes)
+            snapshot = self.graph.get_state(self.config)
+            if snapshot.values.get("is_complete"):
+                status = self.get_status()
+                status["transition"] = "none"
+                return status
 
-        if decision == "advance":
-            next_step = self.state["current_step"] + 1
-            self.state["current_step"] = min(next_step, _MAX_STEP)
-            self.state["deep_dive_count"] = 0
-            if self.state["current_step"] >= _MAX_STEP:
-                self.state["is_complete"] = True
-        else:
-            self.state["deep_dive_count"] += 1
+            old_step = snapshot.values.get("current_step", 0)
+            old_deep_dive = snapshot.values.get("deep_dive_count", 0)
 
-        return self.get_status()
+            # resume — conditional edge が should_advance を呼び、
+            # STAY なら同じノード、ADVANCE なら次のノードへ進んで interrupt_after
+            await self.graph.ainvoke(None, self.config)
+
+            status = self.get_status()
+            new_step = status["current_step"]
+            new_deep_dive = status["deep_dive_count"]
+
+            if new_step > old_step:
+                status["transition"] = "advance"
+                status["step_instruction"] = self.get_step_instruction(new_step)
+                logger.info(f"Transition: ADVANCE step {old_step} → {new_step}")
+            elif new_deep_dive > old_deep_dive:
+                status["transition"] = "stay"
+                logger.info(f"Transition: STAY on step {new_step} (deep_dive={new_deep_dive})")
+            else:
+                status["transition"] = "none"
+
+            return status
 
     def get_status(self) -> dict:
         """デバッグ用のステータス情報を返す."""
+        snapshot = self.graph.get_state(self.config)
+        values = snapshot.values
         return {
             "type": "interview.state",
-            "current_step": self.state["current_step"],
-            "deep_dive_count": self.state["deep_dive_count"],
-            "is_complete": self.state["is_complete"],
-            "step_summaries": self.state.get("step_summaries", {}),
+            "current_step": values.get("current_step", 0),
+            "deep_dive_count": values.get("deep_dive_count", 0),
+            "deep_dive_reason": values.get("deep_dive_reason", ""),
+            "is_complete": values.get("is_complete", False),
+            "step_summaries": values.get("step_summaries", {}),
         }
 
 
@@ -203,22 +269,53 @@ async def _process_ai_transcript(
     session: InterviewSession,
     transcript: str,
     ws: web.WebSocketResponse,
+    openai_ws,
     is_debug: bool,
 ) -> None:
     """AI トランスクリプトをバックグラウンドで処理する.
 
     グラフ実行中に例外が発生してもリレーループを巻き込まないよう
     ここで例外をキャッチしてログに残す。
+    state 遷移があれば OpenAI に system メッセージを注入する。
     """
     try:
         status = await session.process_ai_message(transcript)
         logger.info(
-            f"Interview state (AI): step={status['current_step']}, done={status['is_complete']}"
+            f"Interview state (AI): step={status['current_step']}, "
+            f"transition={status.get('transition')}, done={status['is_complete']}"
         )
+
+        # ── state 変更時に OpenAI へシステムメッセージを注入 ──
+        transition = status.get("transition", "none")
+        if transition != "none" and openai_ws and not openai_ws.closed:
+            if transition == "advance":
+                instruction = status.get("step_instruction", "")
+                if instruction:
+                    await _inject_system_message(openai_ws, instruction)
+            elif transition == "stay":
+                reason = status.get("deep_dive_reason", "")
+                if reason:
+                    msg = f"以下の点についてもう少し深く聞いてください: {reason}"
+                    await _inject_system_message(openai_ws, msg)
+
         if is_debug and not ws.closed:
             await ws.send_str(json.dumps(status, ensure_ascii=False))
     except Exception:
         logger.exception("Error processing AI transcript in graph")
+
+
+async def _inject_system_message(openai_ws, text: str) -> None:
+    """OpenAI Realtime API に conversation.item.create でシステムメッセージを注入する."""
+    event = {
+        "type": "conversation.item.create",
+        "item": {
+            "type": "message",
+            "role": "system",
+            "content": [{"type": "input_text", "text": text}],
+        },
+    }
+    await openai_ws.send(json.dumps(event))
+    logger.info(f"Injected system message to OpenAI: {text[:80]}")
 
 
 class WebSocketRelay:
@@ -248,10 +345,10 @@ class WebSocketRelay:
             openai_ws, session_created = await connect_to_openai()
             self.connections[ws] = openai_ws
 
-            logger.info("Connected to OpenAI successfully!")
+            logger.debug("Connected to OpenAI successfully!")
 
             await ws.send_str(json.dumps(session_created))
-            logger.info("Forwarded session.created to browser")
+            logger.debug("Forwarded session.created to browser")
 
             async def handle_browser_messages():
                 nonlocal session, scenario, is_debug
@@ -260,7 +357,7 @@ class WebSocketRelay:
                         message = msg.data
                         try:
                             event = json.loads(message)
-                            logger.info(f'Relaying "{event.get("type")}" to OpenAI')
+                            logger.debug(f'Relaying "{event.get("type")}" to OpenAI')
                             debug_log_event("Browser -> OpenAI", event)
 
                             # session.update にプロンプトが含まれる場合、セッション初期化
@@ -282,7 +379,8 @@ class WebSocketRelay:
                                 event["session"]["instructions"] = full_prompt
                                 message = json.dumps(event)
 
-                                session = InterviewSession(scenario, full_prompt)
+                                session = InterviewSession(scenario)
+                                await session.initialize()
                                 self.sessions[ws] = session
                                 logger.info(f"InterviewSession created for scenario={scenario}, debug={is_debug}")
                                 if is_debug:
@@ -301,7 +399,7 @@ class WebSocketRelay:
                         message = await openai_ws.recv()
                         try:
                             event = json.loads(message)
-                            logger.info(
+                            logger.debug(
                                 f'Relaying "{event.get("type")}" from OpenAI'
                             )
                             debug_log_event("OpenAI -> Browser", event)
@@ -314,10 +412,10 @@ class WebSocketRelay:
                             ):
                                 transcript = event.get("transcript", "").strip()
                                 if transcript:
-                                    logger.info(f"User transcript: {transcript[:80]}")
+                                    logger.debug(f"User transcript: {transcript[:80]}")
                                     try:
                                         status = await session.process_user_message(transcript)
-                                        logger.info(f"Interview state (user): step={status['current_step']}")
+                                        logger.debug(f"Interview state (user): step={status['current_step']}")
                                         if is_debug:
                                             await ws.send_str(json.dumps(status, ensure_ascii=False))
                                     except Exception:
@@ -332,17 +430,14 @@ class WebSocketRelay:
                             ):
                                 transcript = event.get("transcript", "").strip()
                                 if transcript:
-                                    logger.info(f"AI transcript: {transcript[:80]}")
-                                    asyncio.create_task(
-                                        _process_ai_transcript(
-                                            session, transcript, ws, is_debug
-                                        )
-                                    )
+                                    logger.debug(f"AI transcript: {transcript[:80]}")
+                                    asyncio.create_task(_process_ai_transcript(session, transcript, ws, openai_ws, is_debug))
+                                    # await _process_ai_transcript(session, transcript, ws, openai_ws, is_debug)
 
                         except json.JSONDecodeError:
                             logger.error(f"Invalid JSON from OpenAI: {message}")
                 except websockets.exceptions.ConnectionClosed as e:
-                    logger.info(
+                    logger.debug(
                         f"OpenAI connection closed normally: code={e.code}, reason={e.reason}"
                     )
                     raise
@@ -352,7 +447,7 @@ class WebSocketRelay:
                     handle_browser_messages(), handle_openai_messages()
                 )
             except websockets.exceptions.ConnectionClosed:
-                logger.info("One of the connections closed, cleaning up")
+                logger.debug("One of the connections closed, cleaning up")
 
         except Exception as e:
             logger.error(f"Error handling connection: {str(e)}")
@@ -376,11 +471,21 @@ class WebSocketRelay:
     async def handle_get_instruction(self, request: web.Request):
         scenario = request.query.get("scenario", "exit_interview")
         wd = Path(__file__).parent
-        service_account_path = wd / "ame-ai-agent.json"
 
         doc_id = self.SCENARIO_INSTRUCTION_DOC_ID.get(scenario)
         if not doc_id:
-            return web.Response(status=400, text="Invalid scenario")
+            # Google Doc ID がないシナリオはローカルファイルから読み込む
+            LOCAL_PROMPT_FILES = {"test": "prompt_test.txt"}
+            local_file = LOCAL_PROMPT_FILES.get(scenario)
+            if not local_file:
+                return web.Response(status=400, text="Invalid scenario")
+            prompt_path = wd / local_file
+            if not prompt_path.exists():
+                return web.Response(status=404, text=f"Prompt file not found: {local_file}")
+            content = prompt_path.read_text(encoding="utf-8")
+            return web.Response(text=content)
+
+        service_account_path = wd / "ame-ai-agent.json"
         with open(service_account_path, "r", encoding="utf-8") as f:
             sa_info = json.load(f)
             content = export_doc(doc_id, sa_info, "text/plain")

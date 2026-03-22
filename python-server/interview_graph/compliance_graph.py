@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .edges import make_transition_edge
-from .nodes import make_closing_node, make_greeting_node, make_step_node
+from .edges import route_after_evaluate
+from .nodes import (
+    ask_node,
+    listen_node,
+    make_closing_node,
+    make_evaluate_node,
+    make_greeting_node,
+)
 from .state import InterviewState
 
 # ─── ステップ定義 ─────────────────────────────────────────
@@ -93,53 +99,27 @@ COMPLIANCE_STEPS: dict[int, dict[str, str]] = {
 }
 
 
-def build_compliance_graph(full_prompt: str) -> StateGraph:
-    """コンプライアンス通報面談の StateGraph を構築して compile 済みグラフを返す.
-
-    Args:
-        full_prompt: prompt_compliance.txt から読み込んだ全文プロンプト.
-
-    Returns:
-        Compiled LangGraph.
-    """
+def build_compliance_graph() -> StateGraph:
+    """コンプライアンス通報面談の StateGraph を構築して返す（compile はしない）."""
     graph = StateGraph(InterviewState)
 
-    step_purposes = {k: v["purpose"] for k, v in COMPLIANCE_STEPS.items()}
-    steps = COMPLIANCE_STEPS
-
     # ── ノード登録 ──
-    graph.add_node(
-        "step_0",
-        make_greeting_node(full_prompt, steps[0]["instruction"]),
-    )
-    for i in range(1, 6):
-        graph.add_node(
-            f"step_{i}",
-            make_step_node(i, steps[i]["instruction"], full_prompt),
-        )
-    graph.add_node(
-        "step_6",
-        make_closing_node(full_prompt, steps[6]["instruction"]),
-    )
+    graph.add_node("greet", make_greeting_node())
+    graph.add_node("ask", ask_node)
+    graph.add_node("listen", listen_node)
+    graph.add_node("evaluate", make_evaluate_node(COMPLIANCE_STEPS))
+    graph.add_node("closing", make_closing_node())
 
     # ── エッジ登録 ──
-    graph.set_entry_point("step_0")
+    graph.set_entry_point("greet")
+    graph.add_edge("greet", "ask")
+    graph.add_edge("ask", "listen")
+    graph.add_edge("listen", "evaluate")
+    graph.add_conditional_edges(
+        "evaluate",
+        route_after_evaluate,
+        {"ask": "ask", "closing": "closing"},
+    )
+    graph.add_edge("closing", END)
 
-    # Step 0 → Step 1 (常に)
-    graph.add_edge("step_0", "step_1")
-
-    # Step 1〜5: conditional edges (STAY or ADVANCE)
-    for i in range(1, 6):
-        next_node = f"step_{i + 1}"
-        current_node = f"step_{i}"
-        router = make_transition_edge(step_purposes, next_node)
-        graph.add_conditional_edges(
-            current_node,
-            router,
-            {next_node: next_node, current_node: current_node},
-        )
-
-    # Step 6 → END
-    graph.add_edge("step_6", END)
-
-    return graph.compile()
+    return graph
