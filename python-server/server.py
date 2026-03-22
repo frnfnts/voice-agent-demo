@@ -109,7 +109,14 @@ async def connect_to_openai():
                     "input_audio_format": "pcm16",
                     "output_audio_format": "pcm16",
                     "modalities": ["text", "audio"],
-                    "voice": "alloy",
+                    "voice": "marin",
+                    "speed": 0.8,
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.7,
+                        "silence_duration_ms": 1200,
+                        "prefix_padding_ms": 500,
+                    },
                     "input_audio_transcription": {
                         "model": "gpt-4o-mini-transcribe",
                     },
@@ -157,11 +164,13 @@ class InterviewSession:
     async def process_user_message(self, text: str) -> dict:
         """ユーザー発話を会話履歴に追加する（遷移判定は行わない）."""
         self.state["messages"].append(HumanMessage(content=text))
+        logger.info(f"Appended user message to history: {text[:80]}")
         return self.get_status()
 
     async def process_ai_message(self, text: str) -> dict:
         """AI 発話を会話履歴に追加し、ステップ遷移を判定する."""
         self.state["messages"].append(AIMessage(content=text))
+        logger.info(f"Appended AI message to history: {text[:80]}")
 
         if self.state["is_complete"]:
             return self.get_status()
