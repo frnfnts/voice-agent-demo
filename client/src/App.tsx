@@ -230,13 +230,26 @@ export function App() {
 
   useEffect(() => {
     // Set instructions as JSON containing instruction, scenario, is_debug
+    // Also set turn_detection and voice here to ensure they are included
+    // in the same session.update (library sends ALL sessionConfig fields)
     const client = clientRef.current;
     const payload = JSON.stringify({
       instruction: instructionInfo.text || "",
       scenario: SCENARIO,
       is_debug: IS_DEBUG,
     });
-    client?.updateSession({ instructions: payload });
+    client?.updateSession({
+      instructions: payload,
+      turn_detection: {
+        type: "server_vad",
+        threshold: 0.7,
+        silence_duration_ms: 1200,
+        prefix_padding_ms: 500,
+      },
+      // @ts-ignore
+      voice: 'marin',
+      speed: 0.8,
+    });
   }, [instructionInfo]);
 
   const statusClass = instructionInfo?.error ? "error" : connectionStatus;
