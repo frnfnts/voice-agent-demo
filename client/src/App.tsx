@@ -37,6 +37,7 @@ export function App() {
   const SCENARIO_LABELS: Record<string, string> = {
     exit_interview: "退職面談",
     compliance: "コンプライアンス通報受付",
+    test: "テスト（短縮）",
   };
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected"
@@ -284,6 +285,13 @@ export function App() {
       "証拠確認",
       "影響範囲",
       "希望・懸念",
+      "終了",
+    ],
+    test: [
+      "挨拶",
+      "好きな食べ物",
+      "週末の過ごし方",
+      "うれしかったこと",
       "終了",
     ],
   };
