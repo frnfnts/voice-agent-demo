@@ -42,13 +42,13 @@ echo "$RESPONSE"
 # bot_id を抽出してサーバーに登録する (面談完了時の自動退出用)
 BOT_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
 if [ -n "$BOT_ID" ]; then
-  echo "Registering bot_id=${BOT_ID} with server..."
+  echo "Registering bot_id=${BOT_ID} with server..." >&2
   curl --silent --request POST \
     --url "https://${NGROK_URL}/register-bot" \
     --header 'content-type: application/json' \
-    --data '{"bot_id": "'"${BOT_ID}"'"}'
-  echo ""
+    --data '{"bot_id": "'"${BOT_ID}"'"}' >&2
+  echo "" >&2
 else
-  echo "Warning: Could not extract bot_id from response"
+  echo "Warning: Could not extract bot_id from response" >&2
 fi
 
