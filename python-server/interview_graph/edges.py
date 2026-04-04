@@ -14,6 +14,11 @@ from langchain_openai import ChatOpenAI
 
 from .state import InterviewState
 
+try:
+    from config import MODEL_EVAL
+except ImportError:
+    MODEL_EVAL = "gpt-4o-mini"
+
 logger = logging.getLogger(__name__)
 
 MAX_DEEP_DIVE = 2
@@ -145,7 +150,7 @@ async def should_advance(
     )
 
     recent_messages = list(state["messages"])[-6:]
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatOpenAI(model=MODEL_EVAL, temperature=0)
     messages = [SystemMessage(content=prompt)] + recent_messages
 
     response = await llm.ainvoke(messages)
