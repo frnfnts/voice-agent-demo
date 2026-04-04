@@ -223,6 +223,34 @@ export function App() {
         waitForWs();
       }
 
+      // 面談完了イベントを監視し、サーバーから切断通知が来たら自動切断する
+      {
+        const waitForWsComplete = () => {
+          const ws = client.realtime.ws as WebSocket | undefined;
+          if (!ws) {
+            setTimeout(waitForWsComplete, 100);
+            return;
+          }
+          ws.addEventListener("message", (ev: MessageEvent) => {
+            try {
+              const data = JSON.parse(ev.data);
+              if (data.type === "interview.complete") {
+                console.log("Interview complete — disconnecting");
+                setConnectionStatus("disconnected");
+                const wavRecorder = wavRecorderRef.current;
+                if (wavRecorder?.recording) {
+                  wavRecorder.pause().catch(() => {});
+                }
+                client.disconnect();
+              }
+            } catch {
+              // ignore non-JSON
+            }
+          });
+        };
+        waitForWsComplete();
+      }
+
       return () => {
         client.reset();
       };

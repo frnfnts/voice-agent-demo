@@ -47,6 +47,9 @@ CORS_ALLOW_METHODS = os.getenv("CORS_ALLOW_METHODS", "GET,POST,OPTIONS")
 CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "Content-Type, Authorization, ngrok-skip-browser-warning")
 INSTRUCTION_DOC_ID = os.getenv("INSTRUCTION_DOC_ID", "1cQSHjpoijqEkbvU8h5ZlMzk3qIdy6u4gjL4qXM4BA9w")
 COMPLIANCE_INSTRUCTION_DOC_ID = os.getenv("COMPLIANCE_INSTRUCTION_DOC_ID", "17X_7fQzE14K6FFYWj9PQTPFLCHzsfVG8-phoPH-f37g")
+RECALL_TOKEN = os.getenv("RECALL_TOKEN")
+RECALL_API_BASE = os.getenv("RECALL_API_BASE", "https://ap-northeast-1.recall.ai/api/v1")
+DISCONNECT_DELAY = int(os.getenv("DISCONNECT_DELAY", "8"))
 
 # logger.setLevel("DEBUG" if DEBUG_ENABLED else "INFO")
 logger.setLevel("INFO")
@@ -265,12 +268,69 @@ class InterviewSession:
         }
 
 
+async def _recall_leave_call(bot_id: str) -> None:
+    """Recall.ai API を呼び出してボットをミーティングから退出させる."""
+    if not RECALL_TOKEN:
+        logger.warning("RECALL_TOKEN not set, skipping Recall.ai leave_call")
+        return
+    import aiohttp as _aiohttp
+    url = f"{RECALL_API_BASE}/bot/{bot_id}/leave_call/"
+    headers = {
+        "Authorization": RECALL_TOKEN,
+        "accept": "application/json",
+    }
+    try:
+        async with _aiohttp.ClientSession() as http_session:
+            async with http_session.post(url, headers=headers) as resp:
+                logger.info(f"Recall.ai leave_call response: {resp.status}")
+    except Exception:
+        logger.exception("Error calling Recall.ai leave_call")
+
+
+async def _schedule_disconnect(
+    ws: web.WebSocketResponse,
+    openai_ws,
+    recall_bot_id: str | None = None,
+) -> None:
+    """面談完了後に遅延して WebSocket 接続を切断する."""
+    await asyncio.sleep(DISCONNECT_DELAY)
+    logger.info("Disconnecting after interview completion...")
+
+    # ブラウザに面談完了イベントを送信
+    if not ws.closed:
+        try:
+            await ws.send_str(json.dumps({"type": "interview.complete"}))
+        except Exception:
+            logger.exception("Error sending interview.complete to browser")
+
+    # Recall.ai ボットを退出させる
+    if recall_bot_id:
+        await _recall_leave_call(recall_bot_id)
+
+    # OpenAI WebSocket を閉じる
+    if openai_ws and not openai_ws.closed:
+        try:
+            await openai_ws.close(1000, "Interview complete")
+        except Exception:
+            logger.exception("Error closing OpenAI WebSocket")
+
+    # ブラウザ WebSocket を閉じる
+    if not ws.closed:
+        try:
+            await ws.close(code=1000, message=b"Interview complete")
+        except Exception:
+            logger.exception("Error closing browser WebSocket")
+
+    logger.info("Disconnected after interview completion")
+
+
 async def _process_ai_transcript(
     session: InterviewSession,
     transcript: str,
     ws: web.WebSocketResponse,
     openai_ws,
     is_debug: bool,
+    recall_bot_id: str | None = None,
 ) -> None:
     """AI トランスクリプトをバックグラウンドで処理する.
 
@@ -300,6 +360,12 @@ async def _process_ai_transcript(
 
         if is_debug and not ws.closed:
             await ws.send_str(json.dumps(status, ensure_ascii=False))
+
+        # ── 面談完了時に切断をスケジュール ──
+        if status.get("is_complete"):
+            asyncio.create_task(
+                _schedule_disconnect(ws, openai_ws, recall_bot_id)
+            )
     except Exception:
         logger.exception("Error processing AI transcript in graph")
 
@@ -323,6 +389,8 @@ class WebSocketRelay:
         """Initialize the WebSocket relay server."""
         self.connections = {}
         self.sessions: dict[web.WebSocketResponse, InterviewSession] = {}
+        # Recall.ai bot_id — 最新の登録 bot_id を全接続で共有 (単一ボット想定)
+        self.recall_bot_id: str | None = None
 
     async def handle_browser_connection(self, request: web.Request):
         """Handle a WebSocket connection from the browser."""
@@ -431,7 +499,7 @@ class WebSocketRelay:
                                 transcript = event.get("transcript", "").strip()
                                 if transcript:
                                     logger.debug(f"AI transcript: {transcript[:80]}")
-                                    asyncio.create_task(_process_ai_transcript(session, transcript, ws, openai_ws, is_debug))
+                                    asyncio.create_task(_process_ai_transcript(session, transcript, ws, openai_ws, is_debug, self.recall_bot_id))
                                     # await _process_ai_transcript(session, transcript, ws, openai_ws, is_debug)
 
                         except json.JSONDecodeError:
@@ -468,6 +536,20 @@ class WebSocketRelay:
         "compliance": COMPLIANCE_INSTRUCTION_DOC_ID,
     }
 
+    async def handle_register_bot(self, request: web.Request):
+        """Recall.ai bot_id を登録する. join-bot.sh から呼ばれる想定."""
+        try:
+            body = await request.json()
+            bot_id = body.get("bot_id")
+            if not bot_id:
+                return web.Response(status=400, text="bot_id is required")
+            self.recall_bot_id = bot_id
+            logger.info(f"Registered Recall.ai bot_id: {bot_id}")
+            return web.json_response({"status": "ok", "bot_id": bot_id})
+        except Exception:
+            logger.exception("Error registering bot")
+            return web.Response(status=500, text="Internal server error")
+
     async def handle_get_instruction(self, request: web.Request):
         scenario = request.query.get("scenario", "exit_interview")
         wd = Path(__file__).parent
@@ -496,6 +578,7 @@ class WebSocketRelay:
         app = web.Application(middlewares=[cors_middleware])
         app.router.add_get("/", self.handle_browser_connection)
         app.router.add_get("/get-instruction", self.handle_get_instruction)
+        app.router.add_post("/register-bot", self.handle_register_bot)
 
         runner = web.AppRunner(app)
         await runner.setup()

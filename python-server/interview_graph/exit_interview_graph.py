@@ -78,7 +78,8 @@ EXIT_INTERVIEW_STEPS: dict[int, dict[str, str]] = {
         "instruction": (
             "【Step 6: 終了】\n"
             "感謝を伝え、面談を終了する。\n"
-            "終了後の追加発言は禁止。"
+            "終了後の追加発言は禁止。\n"
+            "通話を切って退出することを促す。"
         ),
     },
 }
