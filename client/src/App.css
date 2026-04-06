@@ -1,0 +1,346 @@
+.app-container,
+.error-container {
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f2f4f7;
+  color: #1f2937;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 2.2rem;
+}
+
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 44px 48px;
+  background-color: white;
+  border-radius: 18px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.12);
+  width: min(680px, 88vw);
+}
+
+.icon-status {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.status-icon-large {
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 16px 45px rgba(15, 23, 42, 0.2);
+  transition: filter 0.3s ease, opacity 0.3s ease, box-shadow 0.3s ease;
+}
+
+.status-icon-large.connected {
+  animation: gentleFloat 4s ease-in-out infinite;
+  filter: none;
+  opacity: 1;
+}
+
+.status-icon-large.connecting {
+  filter: grayscale(1);
+  opacity: 0.6;
+  animation: pulse 1.5s infinite;
+}
+
+.status-icon-large.disconnected {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.status-icon-large.error {
+  filter: grayscale(1);
+  opacity: 0.5;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.25);
+}
+
+.status-state {
+  font-size: 3.4rem;
+  font-weight: 700;
+}
+
+.status-state.disconnected {
+  color: #dc2626;
+}
+
+.status-state.connecting {
+  color: #f59e0b;
+}
+
+.status-state.connected {
+  color: #0f9d58;
+}
+
+.status-state.error {
+  color: #b91c1c;
+}
+
+.scenario-label {
+  font-size: 1.1rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.message-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message-box {
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+}
+
+.message-box.warn {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.message-box.error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.message-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.message-body {
+  font-size: 2rem;
+}
+
+.debug-panel {
+  width: 100%;
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 18px;
+  color: #475569;
+}
+
+.debug-title {
+  font-weight: 700;
+  margin-bottom: 10px;
+  font-size: 2.2rem;
+}
+
+.debug-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 8px 16px;
+  font-size: 1.9rem;
+  margin-bottom: 16px;
+}
+
+.debug-row {
+  display: contents;
+}
+
+.debug-key {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.debug-value {
+  color: #334155;
+  word-break: break-all;
+}
+
+.debug-block {
+  margin-top: 12px;
+}
+
+.debug-subtitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 2rem;
+}
+
+.debug-mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 1.7rem;
+  white-space: pre-wrap;
+  background: white;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+/* ── Step Indicator (debug mode) ── */
+.step-indicator {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.step-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 1.6rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.step-num {
+  font-weight: 700;
+  font-size: 1.5rem;
+}
+
+.step-chip.step-done {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.step-chip.step-active {
+  background: #3b82f6;
+  color: white;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.step-chip.step-pending {
+  background: #e2e8f0;
+  color: #94a3b8;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes gentlePulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(0, 200, 81, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px 10px rgba(0, 200, 81, 0.2);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(0, 200, 81, 0.4);
+  }
+}
+
+@keyframes gentleFloat {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+/* ── Debug mode: 2-column compact layout ── */
+.app-container.debug {
+  font-size: 1.4rem;
+}
+
+.status-panel.debug {
+  flex-direction: row;
+  align-items: flex-start;
+  width: min(1100px, 96vw);
+  padding: 20px 24px;
+  gap: 20px;
+}
+
+.status-panel.debug .icon-status {
+  flex-shrink: 0;
+  width: 200px;
+  gap: 8px;
+}
+
+.status-icon-large.debug {
+  width: 140px;
+  height: 140px;
+}
+
+.status-panel.debug .status-state {
+  font-size: 2rem;
+}
+
+.status-panel.debug .scenario-label {
+  font-size: 0.9rem;
+}
+
+.status-panel.debug .debug-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  font-size: 1.3rem;
+}
+
+.status-panel.debug .debug-title {
+  font-size: 1.5rem;
+  margin-bottom: 6px;
+}
+
+.status-panel.debug .debug-grid {
+  font-size: 1.3rem;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+
+.status-panel.debug .debug-subtitle {
+  font-size: 1.3rem;
+  margin-bottom: 4px;
+}
+
+.status-panel.debug .debug-mono {
+  font-size: 1.1rem;
+  padding: 8px;
+}
+
+.status-panel.debug .debug-block {
+  margin-top: 8px;
+}
+
+.status-panel.debug .step-chip {
+  padding: 2px 7px;
+  font-size: 1.1rem;
+}
+
+.status-panel.debug .step-num {
+  font-size: 1rem;
+}
+
+.status-panel.debug .message-stack {
+  display: none;
+}
+
+.status-panel.debug .message-box {
+  padding: 8px 12px;
+}
+
+.status-panel.debug .message-body {
+  font-size: 1.3rem;
+}
