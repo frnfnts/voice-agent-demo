@@ -11,11 +11,11 @@ from pathlib import Path
 
 from aiohttp import web
 
-from config import PORT, OPENAI_API_KEY, DEBUG_ENABLED, LOG_FILE_PATH
+from config import PORT, OPENAI_API_KEY, DEBUG_ENABLED, LOG_FILE_PATH, LOG_LEVEL
 from interview_session import InterviewSession
 from prompt_service import get_prompt
 from recall_service import recall_leave_call, schedule_disconnect
-from relay import run_relay, inject_system_message
+from relay import run_relay, inject_system_message, send_response_create
 
 # ── ロギング設定 ──
 
@@ -25,8 +25,21 @@ _stream_handler.setFormatter(logging.Formatter(LOG_FMT))
 _file_handler = logging.FileHandler(LOG_FILE_PATH, encoding="utf-8")
 _file_handler.setFormatter(logging.Formatter(LOG_FMT))
 logging.basicConfig(level=logging.INFO, handlers=[_stream_handler, _file_handler])
+
+# プロジェクト内モジュールだけ LOG_LEVEL を適用
+_APP_LOGGERS = [
+    __name__,
+    "relay",
+    "interview_session",
+    "interview_graph.nodes",
+    "interview_graph.edges",
+    "prompt_service",
+    "recall_service",
+]
+for _name in _APP_LOGGERS:
+    logging.getLogger(_name).setLevel(LOG_LEVEL)
+
 logger = logging.getLogger(__name__)
-logger.setLevel("INFO")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY must be set in .env file")
@@ -74,7 +87,7 @@ class WebSocketRelay:
             nonlocal session, scenario, is_debug
 
             if session is not None:
-                return json.dumps(event), True
+                return json.dumps(event), None
 
             raw = event["session"]["instructions"]
             try:
@@ -88,27 +101,56 @@ class WebSocketRelay:
             event["session"]["instructions"] = full_prompt
             message = json.dumps(event)
 
-            # プロンプトからステップ定義を取得（あれば）
+            # プロンプトからステップ定義を取得
             prompt_data = get_prompt(scenario)
-            custom_steps = prompt_data.steps
+            if not prompt_data.steps:
+                logger.error(f"No step definitions found for scenario={scenario}")
+                return message, True
 
-            session = InterviewSession(scenario, custom_steps=custom_steps)
+            session = InterviewSession(prompt_data.steps)
             await session.initialize()
-            logger.info(f"InterviewSession created for scenario={scenario}, debug={is_debug}")
+            logger.info(f"InterviewSession created for scenario={scenario}, steps={list(prompt_data.steps.keys())}, debug={is_debug}")
 
             if is_debug:
                 await browser_ws.send_str(json.dumps(session.get_status()))
 
-            return message, True
+            # Step 0 (greeting) の instruction を返す → relay が session.update 送信後に注入
+            greeting_instruction = session.get_step_instruction(0)
+            return message, greeting_instruction
 
-        async def on_user_transcript(transcript, browser_ws):
+        async def on_user_transcript(transcript, browser_ws, openai_ws):
             if not session:
                 return
             logger.debug(f"User transcript: {transcript[:80]}")
             status = await session.process_user_message(transcript)
-            logger.debug(f"Interview state (user): step={status['current_step']}")
+            logger.debug(
+                f"Interview state (user): step={status['current_step']}, "
+                f"transition={status.get('transition')}, done={status['is_complete']}"
+            )
+
+            # 遷移に応じて OpenAI へシステムメッセージを注入 + 手動応答トリガー
+            transition = status.get("transition", "none")
+            if openai_ws and not openai_ws.closed:
+                if transition == "advance":
+                    instruction = status.get("step_instruction", "")
+                    if instruction:
+                        await inject_system_message(openai_ws, instruction)
+                elif transition == "stay":
+                    reason = status.get("deep_dive_reason", "")
+                    if reason:
+                        msg = f"以下の点についてもう少し深く聞いてください: {reason}"
+                        await inject_system_message(openai_ws, msg)
+                # evaluate 完了後に AI 応答を手動トリガー
+                await send_response_create(openai_ws)
+
             if is_debug and not browser_ws.closed:
                 await browser_ws.send_str(json.dumps(status, ensure_ascii=False))
+
+            # 面談完了時に切断をスケジュール
+            if status.get("is_complete"):
+                asyncio.create_task(
+                    schedule_disconnect(browser_ws, openai_ws, self.recall_bot_id)
+                )
 
         async def on_ai_transcript(transcript, browser_ws, openai_ws):
             if not session:
@@ -116,32 +158,11 @@ class WebSocketRelay:
             logger.debug(f"AI transcript: {transcript[:80]}")
             try:
                 status = await session.process_ai_message(transcript)
-                logger.info(
-                    f"Interview state (AI): step={status['current_step']}, "
-                    f"transition={status.get('transition')}, done={status['is_complete']}"
+                logger.debug(
+                    f"Interview state (AI): step={status['current_step']}, done={status['is_complete']}"
                 )
-
-                # state 変更時に OpenAI へシステムメッセージを注入
-                transition = status.get("transition", "none")
-                if transition != "none" and openai_ws and not openai_ws.closed:
-                    if transition == "advance":
-                        instruction = status.get("step_instruction", "")
-                        if instruction:
-                            await inject_system_message(openai_ws, instruction)
-                    elif transition == "stay":
-                        reason = status.get("deep_dive_reason", "")
-                        if reason:
-                            msg = f"以下の点についてもう少し深く聞いてください: {reason}"
-                            await inject_system_message(openai_ws, msg)
-
                 if is_debug and not browser_ws.closed:
                     await browser_ws.send_str(json.dumps(status, ensure_ascii=False))
-
-                # 面談完了時に切断をスケジュール
-                if status.get("is_complete"):
-                    asyncio.create_task(
-                        schedule_disconnect(browser_ws, openai_ws, self.recall_bot_id)
-                    )
             except Exception:
                 logger.exception("Error processing AI transcript in graph")
 
@@ -167,7 +188,7 @@ class WebSocketRelay:
             if not bot_id:
                 return web.Response(status=400, text="bot_id is required")
             self.recall_bot_id = bot_id
-            logger.info(f"Registered Recall.ai bot_id: {bot_id}")
+            logger.debug(f"Registered Recall.ai bot_id: {bot_id}")
             return web.json_response({"status": "ok", "bot_id": bot_id})
         except Exception:
             logger.exception("Error registering bot")

@@ -19,20 +19,21 @@ from websockets.legacy.client import connect
 from config import OPENAI_API_KEY, MODEL_REALTIME, MODEL_TRANSCRIBE, DEBUG_ENABLED
 
 logger = logging.getLogger(__name__)
+logger.setLevel("INFO")
 
 
 # ── 型エイリアス ──
 
 # session.update を受信した時のコールバック
-# (event, ws, openai_ws) -> (modified_message, session_initialized)
+# (event, ws, openai_ws) -> (modified_message, post_send_instruction | None)
 OnSessionUpdate = Callable[
     [dict, web.WebSocketResponse, any],
-    Awaitable[tuple[str, bool]],
+    Awaitable[tuple[str, str | None]],
 ]
 
 # ユーザートランスクリプトを受信した時のコールバック
 OnUserTranscript = Callable[
-    [str, web.WebSocketResponse],
+    [str, web.WebSocketResponse, any],
     Awaitable[None],
 ]
 
@@ -100,6 +101,8 @@ async def connect_to_openai():
                 "threshold": 0.7,
                 "silence_duration_ms": 1200,
                 "prefix_padding_ms": 500,
+                # 次の会話を開始せず、 evaluate のみをトリガーする設定
+                "create_response": False,
             },
             "input_audio_transcription": {
                 "model": MODEL_TRANSCRIBE,
@@ -124,6 +127,13 @@ async def inject_system_message(openai_ws, text: str) -> None:
     }
     await openai_ws.send(json.dumps(event))
     logger.info(f"Injected system message to OpenAI: {text[:80]}")
+
+
+async def send_response_create(openai_ws) -> None:
+    """OpenAI Realtime API に response.create を送信して AI 応答を手動トリガーする."""
+    event = {"type": "response.create"}
+    await openai_ws.send(json.dumps(event))
+    logger.info("Sent response.create to OpenAI")
 
 
 async def run_relay(
@@ -155,14 +165,20 @@ async def run_relay(
                     debug_log_event("Browser -> OpenAI", event)
 
                     # session.update のインターセプト
+                    post_send_instruction = None
                     if (
                         on_session_update
                         and event.get("type") == "session.update"
                         and event.get("session", {}).get("instructions")
                     ):
-                        message, _ = await on_session_update(event, ws, openai_ws)
+                        message, post_send_instruction = await on_session_update(event, ws, openai_ws)
 
                     await openai_ws.send(message)
+
+                    # session.update 送信後に greeting instruction を注入
+                    if post_send_instruction:
+                        await inject_system_message(openai_ws, post_send_instruction)
+                        await send_response_create(openai_ws)
 
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON from browser: {message}")
@@ -187,7 +203,7 @@ async def run_relay(
                         transcript = event.get("transcript", "").strip()
                         if transcript:
                             try:
-                                await on_user_transcript(transcript, ws)
+                                await on_user_transcript(transcript, ws, openai_ws)
                             except Exception:
                                 logger.exception("Error processing user transcript")
 

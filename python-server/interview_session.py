@@ -11,15 +11,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
-from interview_graph import (
-    InterviewState,
-    build_exit_interview_graph,
-    build_compliance_graph,
-    build_test_graph,
-    EXIT_INTERVIEW_STEPS,
-    COMPLIANCE_STEPS,
-    TEST_STEPS,
-)
+from interview_graph import InterviewState, build_interview_graph
 from prompt_service import StepDef
 
 logger = logging.getLogger(__name__)
@@ -30,29 +22,21 @@ class InterviewSession:
 
     LangGraph の StateGraph + MemorySaver でステップ遷移を管理する。
     ask ノードの interrupt_after でグラフを一時停止し、
-    新しいメッセージが入ったら resume して遷移判定を行う。
+    ユーザー返答後に resume して evaluate → ask のサイクルで遷移する。
+    evaluate の結果（ADVANCE/STAY）を AI 応答の前に返すことで、
+    応答内容に遷移判定を反映できる。
     """
 
     def __init__(
         self,
-        scenario: str,
-        custom_steps: dict[int, StepDef] | None = None,
+        step_definitions: dict[int, StepDef],
     ):
-        self.scenario = scenario
         self._lock = asyncio.Lock()
+        self.step_definitions = step_definitions
+        max_step = max(step_definitions.keys())
 
-        if scenario == "compliance":
-            graph_builder = build_compliance_graph()
-            default_steps = COMPLIANCE_STEPS
-        elif scenario == "test":
-            graph_builder = build_test_graph()
-            default_steps = TEST_STEPS
-        else:
-            graph_builder = build_exit_interview_graph()
-            default_steps = EXIT_INTERVIEW_STEPS
-
-        # custom_steps が渡された場合はそちらを優先
-        self.step_definitions = custom_steps if custom_steps else default_steps
+        graph_builder = build_interview_graph(step_definitions, max_step)
+        logger.debug(f"Compiling interview graph with steps: {list(step_definitions.keys())}")
 
         memory = MemorySaver()
         self.graph = graph_builder.compile(
@@ -77,19 +61,10 @@ class InterviewSession:
             "is_complete": False,
         }
         await self.graph.ainvoke(initial_state, self.config)
-        logger.info("InterviewSession graph initialized at step_0")
+        logger.debug("InterviewSession graph initialized at step_0")
 
     async def process_user_message(self, text: str) -> dict:
-        """ユーザー発話を会話履歴に追加する（遷移判定は行わない）."""
-        self.graph.update_state(
-            self.config,
-            {"messages": [HumanMessage(content=text)]},
-        )
-        logger.info(f"Appended user message to graph state: {text[:80]}")
-        return self.get_status()
-
-    async def process_ai_message(self, text: str) -> dict:
-        """AI 発話を会話履歴に追加し、グラフを resume してステップ遷移を判定する.
+        """ユーザー発話を会話履歴に追加し、グラフを resume してステップ遷移を判定する.
 
         返却 dict に遷移情報を追加:
         - transition: "advance" | "stay" | "none"
@@ -99,9 +74,9 @@ class InterviewSession:
         async with self._lock:
             self.graph.update_state(
                 self.config,
-                {"messages": [AIMessage(content=text)]},
+                {"messages": [HumanMessage(content=text)]},
             )
-            logger.info(f"Appended AI message to graph state: {text[:80]}")
+            logger.debug(f"Appended user message to graph state: {text[:80]}")
 
             snapshot = self.graph.get_state(self.config)
             if snapshot.values.get("is_complete"):
@@ -121,16 +96,25 @@ class InterviewSession:
             if new_step > old_step:
                 status["transition"] = "advance"
                 status["step_instruction"] = self.get_step_instruction(new_step)
-                logger.info(f"Transition: ADVANCE step {old_step} → {new_step}")
+                logger.debug(f"Transition: ADVANCE step {old_step} → {new_step}")
             elif new_deep_dive > old_deep_dive:
                 status["transition"] = "stay"
-                logger.info(
+                logger.debug(
                     f"Transition: STAY on step {new_step} (deep_dive={new_deep_dive})"
                 )
             else:
                 status["transition"] = "none"
 
             return status
+
+    async def process_ai_message(self, text: str) -> dict:
+        """AI 発話を会話履歴に追加する（遷移判定は行わない）."""
+        self.graph.update_state(
+            self.config,
+            {"messages": [AIMessage(content=text)]},
+        )
+        logger.debug(f"Appended AI message to graph state: {text[:80]}")
+        return self.get_status()
 
     def get_status(self) -> dict:
         """デバッグ用のステータス情報を返す."""
