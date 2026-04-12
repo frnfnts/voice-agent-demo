@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # 環境変数が既に設定されている場合はそれを使用し、未設定の場合はデフォルト値を使用
 export FRONTEND_URL="${FRONTEND_URL:-https://voice-agent-demo-1yr.pages.dev}"
 export RECALL_TOKEN="${RECALL_TOKEN:-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
@@ -6,7 +8,7 @@ export MEETING_URL="${MEETING_URL:-https://meet.google.com/qgm-dpzi-cwn}"
 export IS_DEBUG="${IS_DEBUG:-false}"
 export SCENARIO="${SCENARIO:-exit_interview}" # exit_interview または compliance を指定可能
 
-if [ "$NGROK_URL" = "*:3000" ]; then
+if [[ "$NGROK_URL" =~ .*:3000 ]]; then
   ws_url="ws://${NGROK_URL}"
   http_url="http://${NGROK_URL}"
 else
@@ -59,4 +61,3 @@ if [ -n "$BOT_ID" ]; then
 else
   echo "Warning: Could not extract bot_id from response" >&2
 fi
-
