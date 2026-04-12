@@ -183,6 +183,16 @@ def get_prompt(scenario: str, use_cache: bool = True) -> StructuredPrompt:
             text = ""
 
     result = parse_structured_prompt(text)
+
+    # Google Drive のプロンプトに ---STEPS--- が無い場合、ローカルファイルからステップ定義を補完
+    if result.steps is None:
+        local_text = _get_local_fallback(scenario)
+        if local_text:
+            local_result = parse_structured_prompt(local_text)
+            if local_result.steps:
+                result.steps = local_result.steps
+                logger.info(f"Supplemented steps from local file for scenario={scenario}")
+
     logger.debug(f"Parsed prompt for scenario={scenario}: main_prompt length={len(result.main_prompt)}, steps={list(result.steps.keys()) if result.steps else 'None'}")
     _prompt_cache[scenario] = result
     return result

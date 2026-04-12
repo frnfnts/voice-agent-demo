@@ -25,7 +25,7 @@ const SCENARIO_LABELS: Record<string, string> = {
 const STEP_LABELS: Record<string, string[]> = {
   exit_interview: ["趣旨説明", "入社理由", "ギャップ", "きっかけ", "決め手", "改善可能性", "終了"],
   compliance: ["趣旨説明", "概要把握", "5W1H", "証拠確認", "影響範囲", "希望・懸念", "終了"],
-  test: ["挨拶", "好きな食べ物", "週末の過ごし方", "うれしかったこと", "終了"],
+  test: ["挨拶", "うれしかったこと", "終了"],
 };
 
 function getInitialError(): string | undefined {
