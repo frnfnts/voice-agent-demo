@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # 環境変数が既に設定されている場合はそれを使用し、未設定の場合はデフォルト値を使用
 export FRONTEND_URL="${FRONTEND_URL:-https://voice-agent-demo-1yr.pages.dev}"
 export RECALL_TOKEN="${RECALL_TOKEN:-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
@@ -5,6 +7,14 @@ export NGROK_URL="${NGROK_URL:-52.193.78.104:3000}"
 export MEETING_URL="${MEETING_URL:-https://meet.google.com/qgm-dpzi-cwn}"
 export IS_DEBUG="${IS_DEBUG:-false}"
 export SCENARIO="${SCENARIO:-exit_interview}" # exit_interview または compliance を指定可能
+
+if [[ "$NGROK_URL" =~ .*:3000 ]]; then
+  ws_url="ws://${NGROK_URL}"
+  http_url="http://${NGROK_URL}"
+else
+  ws_url="wss://${NGROK_URL}"
+  http_url="https://${NGROK_URL}"
+fi
 
 
 # NGROK を使う場合は config.url は ws じゃなくて wss にする
@@ -21,7 +31,7 @@ RESPONSE=$(curl --silent --request POST \
       "camera": {
         "kind": "webpage",
         "config": {
-          "url": "'"${FRONTEND_URL}"'?wss=ws://'"${NGROK_URL}"'&debug='"${IS_DEBUG}"'&scenario='"${SCENARIO}"'"
+          "url": "'"${FRONTEND_URL}"'?wss='"${ws_url}"'&debug='"${IS_DEBUG}"'&scenario='"${SCENARIO}"'"
         }
       }
     },
@@ -44,11 +54,10 @@ BOT_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.std
 if [ -n "$BOT_ID" ]; then
   echo "Registering bot_id=${BOT_ID} with server..." >&2
   curl --silent --request POST \
-    --url "https://${NGROK_URL}/register-bot" \
+    --url "${http_url}/register-bot" \
     --header 'content-type: application/json' \
     --data '{"bot_id": "'"${BOT_ID}"'"}' >&2
   echo "" >&2
 else
   echo "Warning: Could not extract bot_id from response" >&2
 fi
-

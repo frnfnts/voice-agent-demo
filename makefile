@@ -13,7 +13,7 @@ front-test:
 # 	http://localhost:5173/?wss=wss://eloy-astrographic-sydney.ngrok-free.dev&debug=true
 
 join:
-	./join-bot.sh
+	./join-bot.sh | jq
 
 upload-chat-logs:
 	cd python-server && \

@@ -85,7 +85,7 @@ async def connect_to_openai():
     response = await ws.recv()
     event = json.loads(response)
     if event.get("type") != "session.created":
-        raise Exception(f"Expected session.created, got {event.get('type')}")
+        raise Exception(f"Expected session.created, got {event.get('type')}. event: {event}")
     logger.debug("Received session.created response")
 
     update_session = {

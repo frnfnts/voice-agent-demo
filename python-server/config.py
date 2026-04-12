@@ -8,7 +8,7 @@ load_dotenv()
 
 # ── サーバー設定 ──
 PORT = int(os.getenv("PORT", 3000))
-LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DEBUG_ENABLED = LOG_LEVEL == "DEBUG"
 
 # ── CORS ──
