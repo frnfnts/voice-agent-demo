@@ -182,6 +182,45 @@
   border: 1px solid #e2e8f0;
 }
 
+/* ── Step Indicator (debug mode) ── */
+.step-indicator {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.step-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 1.6rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.step-num {
+  font-weight: 700;
+  font-size: 1.5rem;
+}
+
+.step-chip.step-done {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.step-chip.step-active {
+  background: #3b82f6;
+  color: white;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.step-chip.step-pending {
+  background: #e2e8f0;
+  color: #94a3b8;
+}
+
 @keyframes pulse {
   0% {
     opacity: 1;
@@ -219,4 +258,89 @@
   100% {
     transform: translateY(0px);
   }
+}
+
+/* ── Debug mode: 2-column compact layout ── */
+.app-container.debug {
+  font-size: 1.4rem;
+}
+
+.status-panel.debug {
+  flex-direction: row;
+  align-items: flex-start;
+  width: min(1100px, 96vw);
+  padding: 20px 24px;
+  gap: 20px;
+}
+
+.status-panel.debug .icon-status {
+  flex-shrink: 0;
+  width: 200px;
+  gap: 8px;
+}
+
+.status-icon-large.debug {
+  width: 140px;
+  height: 140px;
+}
+
+.status-panel.debug .status-state {
+  font-size: 2rem;
+}
+
+.status-panel.debug .scenario-label {
+  font-size: 0.9rem;
+}
+
+.status-panel.debug .debug-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  font-size: 1.3rem;
+}
+
+.status-panel.debug .debug-title {
+  font-size: 1.5rem;
+  margin-bottom: 6px;
+}
+
+.status-panel.debug .debug-grid {
+  font-size: 1.3rem;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+
+.status-panel.debug .debug-subtitle {
+  font-size: 1.3rem;
+  margin-bottom: 4px;
+}
+
+.status-panel.debug .debug-mono {
+  font-size: 1.1rem;
+  padding: 8px;
+}
+
+.status-panel.debug .debug-block {
+  margin-top: 8px;
+}
+
+.status-panel.debug .step-chip {
+  padding: 2px 7px;
+  font-size: 1.1rem;
+}
+
+.status-panel.debug .step-num {
+  font-size: 1rem;
+}
+
+.status-panel.debug .message-stack {
+  display: none;
+}
+
+.status-panel.debug .message-box {
+  padding: 8px 12px;
+}
+
+.status-panel.debug .message-body {
+  font-size: 1.3rem;
 }

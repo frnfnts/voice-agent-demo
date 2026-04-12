@@ -1,212 +1,103 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { RealtimeClient } from "@openai/realtime-api-beta";
-// @ts-expect-error - External library without type definitions
-import { WavRecorder, WavStreamPlayer } from "./lib/wavtools/index.js";
-import {
-  fallbackInstructions,
-} from "./conversation_config.js";
+import { useState, useEffect, useCallback } from "react";
 import "./App.css";
 import ayaIcon from "../aya.png";
+import { useRealtimeConnection } from "./hooks/useRealtimeConnection.js";
+import { useInstructions } from "./hooks/useInstructions.js";
+import { useInterviewState } from "./hooks/useInterviewState.js";
+import { useAudioHandlers } from "./hooks/useAudioHandlers.js";
+import { DebugPanel } from "./components/DebugPanel.js";
+import { MessageStack } from "./components/MessageStack.js";
 
-const clientRef = { current: null as RealtimeClient | null };
-const wavRecorderRef = { current: null as WavRecorder | null };
-const wavStreamPlayerRef = { current: null as WavStreamPlayer | null };
+const params = new URLSearchParams(window.location.search);
+const RELAY_SERVER_URL = params.get("wss");
+const BACKEND_URL = RELAY_SERVER_URL
+  ? RELAY_SERVER_URL.replace("wss://", "https://").replace("ws://", "http://")
+  : null;
+const IS_DEBUG = params.get("debug") === "true";
+const SCENARIO = params.get("scenario") || "exit_interview";
 
-type InstructionInfo = {
-  source: "google-drive" | "fallback" | "none";
-  text?: string;
-  error?: string;
-  warn?: string;
+const SCENARIO_LABELS: Record<string, string> = {
+  exit_interview: "退職面談",
+  compliance: "コンプライアンス通報受付",
+  test: "テスト（短縮）",
 };
 
+const STEP_LABELS: Record<string, string[]> = {
+  exit_interview: ["趣旨説明", "入社理由", "ギャップ", "きっかけ", "決め手", "改善可能性", "終了"],
+  compliance: ["趣旨説明", "概要把握", "5W1H", "証拠確認", "影響範囲", "希望・懸念", "終了"],
+  test: ["挨拶", "好きな食べ物", "週末の過ごし方", "うれしかったこと", "終了"],
+};
+
+function getInitialError(): string | undefined {
+  if (!RELAY_SERVER_URL) return 'Missing required "wss" parameter in URL';
+  try {
+    new URL(RELAY_SERVER_URL);
+    return undefined;
+  } catch {
+    return 'Invalid URL format for "wss" parameter';
+  }
+}
+
 export function App() {
-  const params = new URLSearchParams(window.location.search);
-  const RELAY_SERVER_URL = params.get("wss");
-  const BACKEND_URL = RELAY_SERVER_URL
-    ? RELAY_SERVER_URL.replace("wss://", "https://").replace("ws://", "http://")
-    : null;
-  const IS_DEBUG = params.get("debug") === "true";
-  const SCENARIO = params.get("scenario") || "exit_interview";
-  const SCENARIO_LABELS: Record<string, string> = {
-    exit_interview: "退職面談",
-    compliance: "コンプライアンス通報受付",
-  };
-  const [connectionStatus, setConnectionStatus] = useState<
-    "disconnected" | "connecting" | "connected"
-  >("disconnected");
-  const [instructionInfo, setInstructionInfo] = useState<InstructionInfo>({
-    source: "none",
-    error: (() => {
-        if (!RELAY_SERVER_URL) {
-            return 'Missing required "wss" parameter in URL';
-        }
-        try {
-          new URL(RELAY_SERVER_URL);
-          return;
-        } catch {
-          return 'Invalid URL format for "wss" parameter';
-        }
-      })(),
-  });
+  const initialError = getInitialError();
 
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const addLog = useCallback(
+    (msg: string) => setDebugLogs((prev) => [...prev, msg]),
+    []
+  );
 
-  if (!clientRef.current) {
-    clientRef.current = new RealtimeClient({
-      url: RELAY_SERVER_URL || undefined,
-    });
-  }
-  if (!wavRecorderRef.current) {
-    wavRecorderRef.current = new WavRecorder({ sampleRate: 24000 });
-  }
-  if (!wavStreamPlayerRef.current) {
-    wavStreamPlayerRef.current = new WavStreamPlayer({ sampleRate: 24000 });
-  }
-  const isConnectedRef = useRef(false);
-  const connectConversation = useCallback(async () => {
-    if (isConnectedRef.current) return;
-    isConnectedRef.current = true;
-    setConnectionStatus("connecting");
-    const client = clientRef.current;
-    const wavRecorder = wavRecorderRef.current;
-    const wavStreamPlayer = wavStreamPlayerRef.current;
-    if (!client || !wavRecorder || !wavStreamPlayer) return;
+  const { client, connectionStatus, connect, disconnect } =
+    useRealtimeConnection(RELAY_SERVER_URL);
 
-    try {
-      // Connect to microphone
-      await wavRecorder.begin();
+  const { instructionInfo } =
+    useInstructions(BACKEND_URL, SCENARIO, addLog, initialError);
 
-      // Connect to audio output
-      await wavStreamPlayer.connect();
+  const onDisconnect = useCallback(() => disconnect(), [disconnect]);
 
-      // Connect to realtime API
-      await client.connect();
+  const { interviewState } = useInterviewState(
+    client,
+    IS_DEBUG,
+    onDisconnect,
+    addLog
+  );
 
-      setConnectionStatus("connected");
+  // client が出力した音声を再生するハンドラー
+  useAudioHandlers(client);
 
-      client.on("error", (event: any) => {
-        console.error(event);
-        setConnectionStatus("disconnected");
-      });
-
-      client.on("disconnected", () => {
-        setConnectionStatus("disconnected");
-      });
-
-      client.sendUserMessageContent([
-        {
-          type: `input_text`,
-          text: `こんにちは!`,
-        },
-      ]);
-
-      // Always use VAD mode
-      client.updateSession({
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.7,              // デフォルト0.5 → 小さな音声・フィラーで誤検出しにくく
-          silence_duration_ms: 1200,    // デフォルト500 → 考え中の沈黙で割り込まない
-          prefix_padding_ms: 500,       // デフォルト300 → 発話開始判定にバッファを持たせる
-        },
-        // @ts-ignore  ライブラリが古いので marin が指定できないので無視する
-        voice: 'marin',
-        speed: 0.8,
-      });
-
-      // Check if we're already recording before trying to pause
-      if (wavRecorder.recording) {
-        await wavRecorder.pause();
-      }
-
-      // Check if we're already paused before trying to record
-      if (!wavRecorder.recording) {
-        await wavRecorder.record((data: { mono: Float32Array }) =>
-          client.appendInputAudio(data.mono)
-        );
-      }
-    } catch (error) {
-      console.error("Connection error:", error);
-      setConnectionStatus("disconnected");
-    }
-  }, []);
-
-  /**
-   * Core RealtimeClient and audio capture setup
-   * Set all of our instructions, tools, events and more
-   */
-  useEffect(() => {(async () => {
-    // Only run the effect if there's no error
-    if (!instructionInfo?.error) {
-      connectConversation();
-      const wavStreamPlayer = wavStreamPlayerRef.current;
-      const client = clientRef.current;
-      if (!client || !wavStreamPlayer) return;
-
-      const fetchedInstructions = await fetch(
-        `${BACKEND_URL}/get-instruction?scenario=${SCENARIO}`,
-        {
-          headers: {
-            "content-type": "text/plain",
-            "ngrok-skip-browser-warning": "true",
-          },
-        }
-      ).catch((error) => {
-        console.error("Failed to fetch instructions from Drive:", error);
-        setInstructionInfo({
-          source: "fallback",
-          text: fallbackInstructions,
-          warn: "Failed to fetch instructions from Drive, using fallback.",
-        });
-        setDebugLogs((logs) => [...logs, "Using fallback instructions.", error.toString()]);
-      });
-
-      if (fetchedInstructions) {
-        console.log(fetchedInstructions);
-        setInstructionInfo({
-          source: "google-drive",
-          text: await fetchedInstructions.body?.getReader().read().then(async ({ value }) => {
-            const decoder = new TextDecoder("utf-8");
-            return decoder.decode(value);
-          }),
-        });
-        setDebugLogs((logs) => [...logs, "Fetched instructions from Google Drive."]);
-      }
-
-      // handle realtime events from client + server for event logging
-      client.on("error", (event: any) => console.error(event));
-      client.on("conversation.interrupted", async () => {
-        const trackSampleOffset = await wavStreamPlayer.interrupt();
-        if (trackSampleOffset?.trackId) {
-          const { trackId, offset } = trackSampleOffset;
-          await client.cancelResponse(trackId, offset);
-        }
-      });
-      client.on("conversation.updated", async ({ item, delta }: any) => {
-        client.conversation.getItems();
-        if (delta?.audio) {
-          wavStreamPlayer.add16BitPCM(delta.audio, item.id);
-        }
-        if (item.status === "completed" && item.formatted.audio?.length) {
-          const wavFile = await WavRecorder.decode(
-            item.formatted.audio,
-            24000,
-            24000
-          );
-          item.formatted.file = wavFile;
-        }
-      });
-
-      return () => {
-        client.reset();
-      };
-    }
-  })()}, [instructionInfo?.error]);
-
+  // Connect on mount (if no error)
   useEffect(() => {
-    // Set instructions
-    const client = clientRef.current;
-    client?.updateSession({ instructions: instructionInfo.text || "" });
-  }, [instructionInfo]);
+    if (!initialError) {
+      connect();
+    }
+  }, [initialError, connect]);
+
+  // Send session config when instructions are ready
+  useEffect(() => {
+    if (!client) return;
+    const payload = JSON.stringify({
+      instruction: instructionInfo.text || "",
+      scenario: SCENARIO,
+      is_debug: IS_DEBUG,
+    });
+    client.updateSession({
+      instructions: payload,
+      modalities: ["text", "audio"],
+      // @ts-ignore
+      voice: "marin",
+      speed: 0.9,
+      turn_detection: {
+        type: "server_vad",
+        threshold: 0.7,
+        silence_duration_ms: 1200,
+        prefix_padding_ms: 500,
+      },
+      input_audio_transcription: {
+        // @ts-ignore
+        model: "gpt-4o-mini-transcribe",
+      },
+    });
+  }, [instructionInfo, client]);
 
   const statusClass = instructionInfo?.error ? "error" : connectionStatus;
   const statusLabel = instructionInfo?.error
@@ -216,57 +107,32 @@ export function App() {
     : connectionStatus === "connected"
     ? "Connected"
     : "Disconnected";
-  const instructionLength = instructionInfo?.text?.length || 0;
+  const stepLabels = STEP_LABELS[SCENARIO] || STEP_LABELS.exit_interview;
 
   return (
-    <div className="app-container">
-      <div className="status-panel">
+    <div className={`app-container${IS_DEBUG ? " debug" : ""}`}>
+      <div className={`status-panel${IS_DEBUG ? " debug" : ""}`}>
         <div className="icon-status">
-          <img className={`status-icon-large ${statusClass}`} src={ayaIcon} alt="aya" />
+          <img
+            className={`status-icon-large ${statusClass}${IS_DEBUG ? " debug" : ""}`}
+            src={ayaIcon}
+            alt="aya"
+          />
           <div className={`status-state ${statusClass}`}>{statusLabel}</div>
-          <div className="scenario-label">{SCENARIO_LABELS[SCENARIO] || SCENARIO}</div>
+          <div className="scenario-label">
+            {SCENARIO_LABELS[SCENARIO] || SCENARIO}
+          </div>
         </div>
 
-        {(instructionInfo?.warn || instructionInfo?.error) && (
-          <div className="message-stack">
-            {instructionInfo?.warn && (
-              <div className="message-box warn">
-                <div className="message-title">Warning</div>
-                <div className="message-body">{instructionInfo.warn}</div>
-              </div>
-            )}
-            {instructionInfo?.error && (
-              <div className="message-box error">
-                <div className="message-title">Error</div>
-                <div className="message-body">{instructionInfo.error}</div>
-              </div>
-            )}
-          </div>
-        )}
+        <MessageStack instructionInfo={instructionInfo} />
 
         {IS_DEBUG && (
-          <div className="debug-panel">
-            <div className="debug-title">Debug</div>
-            <div className="debug-grid">
-              <div className="debug-row">
-                <div className="debug-key">instructionSource</div>
-                <div className="debug-value">{instructionInfo?.source}</div>
-              </div>
-            </div>
-            <div className="debug-block">
-              <div className="debug-subtitle">Instruction Preview</div>
-              <div className="debug-mono">
-                {(instructionInfo?.text || "").slice(0, 100)}
-                {instructionLength > 100 ? "..." : ""}
-              </div>
-            </div>
-            <div className="debug-block">
-              <div className="debug-subtitle">Logs</div>
-              <div className="debug-mono">
-                {debugLogs.length ? debugLogs.join("\n") : "(no logs)"}
-              </div>
-            </div>
-          </div>
+          <DebugPanel
+            interviewState={interviewState}
+            instructionInfo={instructionInfo}
+            debugLogs={debugLogs}
+            stepLabels={stepLabels}
+          />
         )}
       </div>
     </div>

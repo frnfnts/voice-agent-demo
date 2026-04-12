@@ -9,7 +9,7 @@ export SCENARIO="${SCENARIO:-exit_interview}" # exit_interview または complia
 
 # NGROK を使う場合は config.url は ws じゃなくて wss にする
 # TODO: 自前サーバーの場合も wss を使えるようにしたい
-curl --request POST \
+RESPONSE=$(curl --silent --request POST \
   --url https://ap-northeast-1.recall.ai/api/v1/bot/ \
   --header "Authorization: ${RECALL_TOKEN}" \
   --header 'accept: application/json' \
@@ -35,5 +35,20 @@ curl --request POST \
         "audio": true
       }
     }
-  }'
+  }')
+
+echo "$RESPONSE"
+
+# bot_id を抽出してサーバーに登録する (面談完了時の自動退出用)
+BOT_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+if [ -n "$BOT_ID" ]; then
+  echo "Registering bot_id=${BOT_ID} with server..." >&2
+  curl --silent --request POST \
+    --url "https://${NGROK_URL}/register-bot" \
+    --header 'content-type: application/json' \
+    --data '{"bot_id": "'"${BOT_ID}"'"}' >&2
+  echo "" >&2
+else
+  echo "Warning: Could not extract bot_id from response" >&2
+fi
 

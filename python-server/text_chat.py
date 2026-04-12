@@ -354,6 +354,13 @@ SCENARIOS = {
         "end_keywords": ["以上となります", "事実確認を進めて"],
         "ai_label": "通報窓口",
     },
+    "test": {
+        "label": "テスト（短縮シナリオ）",
+        "prompt_file": "prompt_test.txt",
+        "personas": ["frank"],
+        "end_keywords": ["ありがとうございました"],
+        "ai_label": "テストAI",
+    },
 }
 
 
