@@ -57,6 +57,8 @@ class InterviewSession:
             "messages": [],
             "deep_dive_count": 0,
             "deep_dive_reason": "",
+            "response_type": "none",
+            "non_answer_count": 0,
             "step_summaries": {},
             "is_complete": False,
         }
@@ -67,9 +69,9 @@ class InterviewSession:
         """ユーザー発話を会話履歴に追加し、グラフを resume してステップ遷移を判定する.
 
         返却 dict に遷移情報を追加:
-        - transition: "advance" | "stay" | "none"
+        - transition: "advance" | "stay" | "clarify" | "process" | "none"
         - step_instruction: ADVANCE 時は新ステップの instruction
-        - deep_dive_reason: STAY 時の深掘り理由
+        - deep_dive_reason: STAY/CLARIFY/PROCESS 時の理由
         """
         async with self._lock:
             self.graph.update_state(
@@ -86,12 +88,15 @@ class InterviewSession:
 
             old_step = snapshot.values.get("current_step", 0)
             old_deep_dive = snapshot.values.get("deep_dive_count", 0)
+            old_non_answer = snapshot.values.get("non_answer_count", 0)
 
             await self.graph.ainvoke(None, self.config)
 
             status = self.get_status()
             new_step = status["current_step"]
             new_deep_dive = status["deep_dive_count"]
+            new_non_answer = status.get("non_answer_count", 0)
+            response_type = status.get("response_type", "none")
 
             if new_step > old_step:
                 status["transition"] = "advance"
@@ -101,6 +106,15 @@ class InterviewSession:
                 status["transition"] = "stay"
                 logger.debug(
                     f"Transition: STAY on step {new_step} (deep_dive={new_deep_dive})"
+                )
+            elif (
+                new_non_answer > old_non_answer
+                and response_type in {"clarify", "process"}
+            ):
+                status["transition"] = response_type
+                logger.info(
+                    f"Transition: {response_type.upper()} on step {new_step} "
+                    f"(non_answer_count={new_non_answer})"
                 )
             else:
                 status["transition"] = "none"
@@ -125,6 +139,8 @@ class InterviewSession:
             "current_step": values.get("current_step", 0),
             "deep_dive_count": values.get("deep_dive_count", 0),
             "deep_dive_reason": values.get("deep_dive_reason", ""),
+            "response_type": values.get("response_type", "none"),
+            "non_answer_count": values.get("non_answer_count", 0),
             "is_complete": values.get("is_complete", False),
             "step_summaries": values.get("step_summaries", {}),
         }
