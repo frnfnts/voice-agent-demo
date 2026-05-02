@@ -214,9 +214,10 @@ async def run_relay(
                     ):
                         transcript = event.get("transcript", "").strip()
                         if transcript:
-                            asyncio.create_task(
-                                on_ai_transcript(transcript, ws, openai_ws)
-                            )
+                            try:
+                                await on_ai_transcript(transcript, ws, openai_ws)
+                            except Exception:
+                                logger.exception("Error processing AI transcript")
 
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON from OpenAI: {message}")

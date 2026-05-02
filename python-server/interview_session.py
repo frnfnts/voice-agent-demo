@@ -78,7 +78,7 @@ class InterviewSession:
                 self.config,
                 {"messages": [HumanMessage(content=text)]},
             )
-            logger.debug(f"Appended user message to graph state: {text[:80]}")
+            logger.info(f"Appended user message to graph state: {text[:80]}")
 
             snapshot = self.graph.get_state(self.config)
             if snapshot.values.get("is_complete"):
@@ -123,12 +123,13 @@ class InterviewSession:
 
     async def process_ai_message(self, text: str) -> dict:
         """AI 発話を会話履歴に追加する（遷移判定は行わない）."""
-        self.graph.update_state(
-            self.config,
-            {"messages": [AIMessage(content=text)]},
-        )
-        logger.debug(f"Appended AI message to graph state: {text[:80]}")
-        return self.get_status()
+        async with self._lock:
+            self.graph.update_state(
+                self.config,
+                {"messages": [AIMessage(content=text)]},
+            )
+            logger.info(f"Appended AI message to graph state: {text[:80]}")
+            return self.get_status()
 
     def get_status(self) -> dict:
         """デバッグ用のステータス情報を返す."""
