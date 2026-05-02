@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
+import os
+
 from google_drive_docs_export import export_doc
 from config import (
     INSTRUCTION_DOC_ID,
@@ -113,13 +115,24 @@ def parse_structured_prompt(text: str) -> StructuredPrompt:
 
 
 def _load_sa_info() -> dict | None:
-    """サービスアカウント認証情報を読み込む."""
+    """サービスアカウント認証情報を取得する.
+
+    環境変数 GOOGLE_SA_CREDENTIALS (startup.py が SSM から注入) を優先し、
+    なければローカルファイルにフォールバックする。
+    """
+    raw = os.getenv("GOOGLE_SA_CREDENTIALS")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            logger.exception("Failed to parse GOOGLE_SA_CREDENTIALS")
+
     if not SA_CREDENTIALS_PATH.exists():
         return None
     try:
         return json.loads(SA_CREDENTIALS_PATH.read_text())
     except Exception:
-        logger.exception("Failed to load service account credentials")
+        logger.exception("Failed to load service account credentials from local file")
         return None
 
 

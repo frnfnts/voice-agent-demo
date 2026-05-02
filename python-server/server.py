@@ -74,7 +74,7 @@ class WebSocketRelay:
         if request.headers.get("Upgrade", "").lower() != "websocket":
             return web.Response(text="OK")
 
-        ws = web.WebSocketResponse(protocols=("realtime",))
+        ws = web.WebSocketResponse(protocols=("realtime",), heartbeat=30.0)
         await ws.prepare(request)
         logger.info(f"Browser connected from {request.remote}")
 
