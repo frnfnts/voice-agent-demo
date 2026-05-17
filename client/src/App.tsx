@@ -47,18 +47,24 @@ export function App() {
     []
   );
 
-  const { client, connectionStatus, connect, disconnect } =
+  const { client, connectionStatus, connect, stopRecording } =
     useRealtimeConnection(RELAY_SERVER_URL);
 
   const { instructionInfo } =
     useInstructions(BACKEND_URL, SCENARIO, addLog, initialError);
 
-  const onDisconnect = useCallback(() => disconnect(), [disconnect]);
+  // interview.complete 受信時はマイクのみ停止し、音声を最後まで再生させる。
+  // WebSocket は DISCONNECT_DELAY 後にサーバー側で閉じられ、
+  // disconnected イベントで connectionStatus が更新される。
+  const onInterviewComplete = useCallback(
+    () => stopRecording(),
+    [stopRecording]
+  );
 
   const { interviewState } = useInterviewState(
     client,
     IS_DEBUG,
-    onDisconnect,
+    onInterviewComplete,
     addLog
   );
 
