@@ -19,6 +19,7 @@ class InterviewState(TypedDict):
         response_type: evaluate の直近判定種別 (advance/stay/clarify/process).
         non_answer_count: 連続で「回答ではない反応」が続いた回数.
         step_summaries: ステップ番号 → 要約テキスト.
+        coverage: ステップ番号 → {target 名: 取得済み要約} のマップ. 未取得 target は空文字 or キー欠落.
         is_complete: 面談が完了したかどうか.
     """
 
@@ -29,4 +30,5 @@ class InterviewState(TypedDict):
     response_type: str
     non_answer_count: int
     step_summaries: dict[int, str]
+    coverage: dict[int, dict[str, str]]
     is_complete: bool

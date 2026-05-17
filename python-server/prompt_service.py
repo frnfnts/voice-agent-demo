@@ -27,6 +27,7 @@ class StepDef(TypedDict):
     name: str
     purpose: str
     instruction: str
+    targets: list[str]  # ステップで取得したい情報項目（無ければ空リスト）
 
 
 class StructuredPrompt:
@@ -68,19 +69,25 @@ def parse_structured_prompt(text: str) -> StructuredPrompt:
     current_name = ""
     current_purpose = ""
     current_instruction_lines: list[str] = []
+    current_targets: list[str] = []
+    current_field: str | None = None  # "purpose" | "instruction" | "targets"
 
     def _flush():
-        nonlocal current_step_num, current_name, current_purpose, current_instruction_lines
+        nonlocal current_step_num, current_name, current_purpose
+        nonlocal current_instruction_lines, current_targets, current_field
         if current_step_num is not None:
             steps[current_step_num] = StepDef(
                 name=current_name,
                 purpose=current_purpose.strip(),
                 instruction="\n".join(current_instruction_lines).strip(),
+                targets=list(current_targets),
             )
         current_step_num = None
         current_name = ""
         current_purpose = ""
         current_instruction_lines = []
+        current_targets = []
+        current_field = None
 
     for line in steps_part.strip().splitlines():
         stripped = line.strip()
@@ -95,16 +102,34 @@ def parse_structured_prompt(text: str) -> StructuredPrompt:
             except ValueError:
                 continue
             current_name = parts[1].strip() if len(parts) > 1 else ""
+            current_field = None
         elif stripped.startswith("purpose:") and current_step_num is not None:
             current_purpose = stripped[len("purpose:") :].strip()
+            current_field = "purpose"
         elif stripped.startswith("instruction:") and current_step_num is not None:
             current_instruction_lines = [stripped[len("instruction:") :].strip()]
-        elif current_step_num is not None and current_instruction_lines:
-            # instruction の継続行
+            current_field = "instruction"
+        elif stripped.startswith("targets:") and current_step_num is not None:
+            after = stripped[len("targets:") :].strip()
+            if after:
+                current_targets.append(after)
+            current_field = "targets"
+        elif (
+            current_field == "targets"
+            and current_step_num is not None
+            and stripped.startswith("-")
+        ):
+            item = stripped[1:].strip()
+            if item:
+                current_targets.append(item)
+        elif current_field == "instruction" and current_step_num is not None:
+            # instruction の継続行（空行も保持）
             current_instruction_lines.append(line.rstrip())
         elif current_step_num is not None and stripped:
-            # purpose の後、instruction の前にある行は instruction の開始
-            current_instruction_lines.append(stripped)
+            # purpose の後、フィールド指定なしの行 → instruction の開始（既存挙動）
+            if current_field is None or current_field == "purpose":
+                current_field = "instruction"
+                current_instruction_lines.append(stripped)
 
     _flush()
 
