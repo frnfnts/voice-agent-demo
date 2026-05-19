@@ -82,6 +82,7 @@ class WebSocketRelay:
         session: InterviewSession | None = None
         scenario = "exit_interview"
         is_debug = False
+        disconnect_scheduled = False
 
         async def on_session_update(event, browser_ws, openai_ws):
             nonlocal session, scenario, is_debug
@@ -146,13 +147,8 @@ class WebSocketRelay:
             if is_debug and not browser_ws.closed:
                 await browser_ws.send_str(json.dumps(status, ensure_ascii=False))
 
-            # 面談完了時に切断をスケジュール
-            if status.get("is_complete"):
-                asyncio.create_task(
-                    schedule_disconnect(browser_ws, openai_ws, self.recall_bot_id)
-                )
-
         async def on_ai_transcript(transcript, browser_ws, openai_ws):
+            nonlocal disconnect_scheduled
             if not session:
                 return
             logger.debug(f"AI transcript: {transcript[:80]}")
@@ -163,6 +159,13 @@ class WebSocketRelay:
                 )
                 if is_debug and not browser_ws.closed:
                     await browser_ws.send_str(json.dumps(status, ensure_ascii=False))
+
+                # AI の発話完了後に切断をスケジュール（発話途中での切断を防ぐ）
+                if status.get("is_complete") and not disconnect_scheduled:
+                    disconnect_scheduled = True
+                    asyncio.create_task(
+                        schedule_disconnect(browser_ws, openai_ws, self.recall_bot_id)
+                    )
             except Exception:
                 logger.exception("Error processing AI transcript in graph")
 

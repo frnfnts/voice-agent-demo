@@ -60,6 +60,7 @@ class InterviewSession:
             "response_type": "none",
             "non_answer_count": 0,
             "step_summaries": {},
+            "coverage": {},
             "is_complete": False,
         }
         await self.graph.ainvoke(initial_state, self.config)
@@ -144,4 +145,5 @@ class InterviewSession:
             "non_answer_count": values.get("non_answer_count", 0),
             "is_complete": values.get("is_complete", False),
             "step_summaries": values.get("step_summaries", {}),
+            "coverage": values.get("coverage", {}),
         }

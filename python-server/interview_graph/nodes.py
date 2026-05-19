@@ -72,33 +72,52 @@ def make_evaluate_node(step_definitions: dict[int, dict[str, str]], max_step: in
     ADVANCE なら current_step++ して返す。
     CLARIFY/PROCESS の場合はステップを進めず、
     非回答反応カウントを進める。
+    coverage_update があれば state["coverage"][current_step] にマージする。
     """
     from .edges import should_advance
 
     async def evaluate_node(state: InterviewState) -> dict[str, Any]:
-        decision, reason = await should_advance(state, step_definitions, max_step)
+        decision, reason, coverage_update = await should_advance(
+            state, step_definitions, max_step
+        )
         current_step = state["current_step"]
+
+        # coverage のマージ（state["coverage"][current_step] += coverage_update）
+        updated_coverage: dict[int, dict[str, str]] | None = None
+        if coverage_update:
+            existing_all = state.get("coverage", {}) or {}
+            new_all = {int(k): dict(v) for k, v in existing_all.items()}
+            step_cov = dict(new_all.get(current_step, {}))
+            step_cov.update(coverage_update)
+            new_all[current_step] = step_cov
+            updated_coverage = new_all
 
         if decision == "stay":
             new_count = state["deep_dive_count"] + 1
             logger.debug(f"evaluate: STAY on step {current_step} (deep_dive={new_count}, reason={reason})")
-            return {
+            out: dict[str, Any] = {
                 "deep_dive_count": new_count,
                 "deep_dive_reason": reason,
                 "response_type": "stay",
                 "non_answer_count": 0,
             }
+            if updated_coverage is not None:
+                out["coverage"] = updated_coverage
+            return out
 
         if decision == "advance":
             next_step = current_step + 1
             logger.debug(f"evaluate: ADVANCE step {current_step} → {next_step}")
-            return {
+            out = {
                 "current_step": next_step,
                 "deep_dive_count": 0,
                 "deep_dive_reason": "",
                 "response_type": "advance",
                 "non_answer_count": 0,
             }
+            if updated_coverage is not None:
+                out["coverage"] = updated_coverage
+            return out
 
         # 非回答反応はステップ/深掘り回数を進めず、応答タイプだけ記録する
         non_answer_count = state.get("non_answer_count", 0) + 1
@@ -106,10 +125,13 @@ def make_evaluate_node(step_definitions: dict[int, dict[str, str]], max_step: in
             f"evaluate: {decision.upper()} on step {current_step} "
             f"(non_answer_count={non_answer_count}, reason={reason})"
         )
-        return {
+        out = {
             "deep_dive_reason": reason,
             "response_type": decision,
             "non_answer_count": non_answer_count,
         }
+        if updated_coverage is not None:
+            out["coverage"] = updated_coverage
+        return out
 
     return evaluate_node

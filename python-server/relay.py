@@ -126,7 +126,7 @@ async def inject_system_message(openai_ws, text: str) -> None:
         },
     }
     await openai_ws.send(json.dumps(event))
-    logger.info(f"Injected system message to OpenAI: {text[:80]}")
+    logger.info(f"Injected system message to OpenAI: {text}")
 
 
 async def send_response_create(openai_ws) -> None:

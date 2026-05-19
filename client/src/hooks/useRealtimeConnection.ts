@@ -63,15 +63,17 @@ export function useRealtimeConnection(relayServerUrl: string | null) {
     }
   }, []);
 
-  const disconnect = useCallback(() => {
-    const client = clientRef.current;
-    const wavRecorder = wavRecorderRef.current;
-    if (wavRecorder?.recording) {
-      wavRecorder.pause().catch(() => {});
+  const stopRecording = useCallback(() => {
+    if (wavRecorderRef.current?.recording) {
+      wavRecorderRef.current.pause().catch(() => {});
     }
-    client?.disconnect();
-    setConnectionStatus("disconnected");
   }, []);
+
+  const disconnect = useCallback(() => {
+    stopRecording();
+    clientRef.current?.disconnect();
+    setConnectionStatus("disconnected");
+  }, [stopRecording]);
 
   return {
     client: clientRef.current,
@@ -79,5 +81,6 @@ export function useRealtimeConnection(relayServerUrl: string | null) {
     setConnectionStatus,
     connect,
     disconnect,
+    stopRecording,
   };
 }
