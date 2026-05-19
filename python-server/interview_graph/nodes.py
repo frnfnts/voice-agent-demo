@@ -27,6 +27,9 @@ def make_greeting_node():
         return {
             "current_step": 0,
             "deep_dive_count": 0,
+            "deep_dive_reason": "",
+            "response_type": "none",
+            "non_answer_count": 0,
             "is_complete": False,
         }
 
@@ -41,6 +44,9 @@ def make_closing_node(closing_step: int = 6):
         return {
             "current_step": closing_step,
             "deep_dive_count": 0,
+            "deep_dive_reason": "",
+            "response_type": "advance",
+            "non_answer_count": 0,
             "is_complete": True,
         }
 
@@ -64,6 +70,8 @@ def make_evaluate_node(step_definitions: dict[int, dict[str, str]], max_step: in
 
     should_advance() を呼び、STAY なら deep_dive_count++,
     ADVANCE なら current_step++ して返す。
+    CLARIFY/PROCESS の場合はステップを進めず、
+    非回答反応カウントを進める。
     """
     from .edges import should_advance
 
@@ -74,10 +82,34 @@ def make_evaluate_node(step_definitions: dict[int, dict[str, str]], max_step: in
         if decision == "stay":
             new_count = state["deep_dive_count"] + 1
             logger.debug(f"evaluate: STAY on step {current_step} (deep_dive={new_count}, reason={reason})")
-            return {"deep_dive_count": new_count, "deep_dive_reason": reason}
-        else:
+            return {
+                "deep_dive_count": new_count,
+                "deep_dive_reason": reason,
+                "response_type": "stay",
+                "non_answer_count": 0,
+            }
+
+        if decision == "advance":
             next_step = current_step + 1
             logger.debug(f"evaluate: ADVANCE step {current_step} → {next_step}")
-            return {"current_step": next_step, "deep_dive_count": 0, "deep_dive_reason": ""}
+            return {
+                "current_step": next_step,
+                "deep_dive_count": 0,
+                "deep_dive_reason": "",
+                "response_type": "advance",
+                "non_answer_count": 0,
+            }
+
+        # 非回答反応はステップ/深掘り回数を進めず、応答タイプだけ記録する
+        non_answer_count = state.get("non_answer_count", 0) + 1
+        logger.debug(
+            f"evaluate: {decision.upper()} on step {current_step} "
+            f"(non_answer_count={non_answer_count}, reason={reason})"
+        )
+        return {
+            "deep_dive_reason": reason,
+            "response_type": decision,
+            "non_answer_count": non_answer_count,
+        }
 
     return evaluate_node

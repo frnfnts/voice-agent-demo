@@ -21,7 +21,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-MAX_DEEP_DIVE = 3
+MAX_DEEP_DIVE = 2
+MAX_NON_ANSWER = 2
 
 STEP_TRANSITION_PROMPT = """\
 あなたは面談進行の判定アシスタントです。
@@ -34,6 +35,8 @@ STEP_TRANSITION_PROMPT = """\
 ステップ番号: Step {current_step}（{step_name}）
 ステップ目的: {step_purpose}
 ステップ指示: {step_instruction}
+現ステップでの深掘り回数: {deep_dive_count}/{max_deep_dive}
+連続非回答反応回数: {non_answer_count}/{max_non_answer}
 {prev_deep_dive_info}
 
 ═══ 現在のステップでの会話履歴 ═══
@@ -41,7 +44,10 @@ STEP_TRANSITION_PROMPT = """\
 
 ═══ 判定基準 ═══
 - ステップ指示に記載された確認事項に対して、相手が十分な回答を提供した場合 → ADVANCE
-- ステップ目的の達成に必要な情報がまだ不足している場合 → STAY
+- ステップ目的の達成に必要な情報がまだ不足しており、深掘り回数に余裕がある場合 → STAY
+- 深掘り回数が上限に達した場合 → ADVANCE（強制遷移）
+- 相手がAIの質問の意味・意図を聞き返している場合 → CLARIFY
+- 相手が面談プロセス（記録、共有範囲、進め方、所要時間など）について質問している場合 → PROCESS
 - 相手が「話したくない」「答えたくない」と明示した場合 → ADVANCE
 - 相手が「分からない」と言い、別角度で1回聞き直し済みの場合 → ADVANCE
 
@@ -52,6 +58,12 @@ ADVANCE の場合:
 
 STAY の場合（理由と深掘りすべき内容を必ず含めてください）:
 {{"decision": "STAY", "reason": "深掘りすべき理由と具体的な深掘り内容を簡潔に記述。深堀り内容は一度に1点に絞る。"}}\
+
+CLARIFY の場合（ユーザーの聞き返し意図を短く要約してください）:
+{{"decision": "CLARIFY", "reason": "ユーザーが何を確認したいか"}}
+
+PROCESS の場合（プロセスに関する質問意図を短く要約してください）:
+{{"decision": "PROCESS", "reason": "ユーザーのプロセス質問の要点"}}
 """
 
 
@@ -89,7 +101,7 @@ async def should_advance(
     state: InterviewState,
     step_definitions: dict[int, dict[str, str]],
     max_step: int = 6,
-) -> tuple[Literal["advance", "stay"], str]:
+) -> tuple[Literal["advance", "stay", "clarify", "process"], str]:
     """現在のステップから次に進むべきか LLM + ルールで判定する.
 
     Args:
@@ -98,11 +110,18 @@ async def should_advance(
         max_step: closing ステップ番号.
 
     Returns:
-        (decision, reason): decision は "advance" or "stay",
+        (decision, reason): decision は "advance"/"stay"/"clarify"/"process",
         reason は STAY 時の深掘り理由（ADVANCE 時は空文字列）。
     """
     current_step = state["current_step"]
     deep_dive_count = state["deep_dive_count"]
+    non_answer_count = state.get("non_answer_count", 0)
+
+    if non_answer_count >= MAX_NON_ANSWER:
+        logger.info(
+            f"Step {current_step}: 非回答反応上限 ({MAX_NON_ANSWER}) 到達 → STAY で本題に戻す"
+        )
+        return ("stay", "本題の回答がまだ不足しています。現在の質問に1点だけ具体的に答えてもらってください。")
 
     if deep_dive_count >= MAX_DEEP_DIVE:
         logger.debug(f"Step {current_step}: 深掘り上限 ({MAX_DEEP_DIVE}) 到達 → 強制遷移")
@@ -133,6 +152,10 @@ async def should_advance(
         step_name=step_name,
         step_purpose=step_purpose,
         step_instruction=step_instruction,
+        deep_dive_count=deep_dive_count,
+        max_deep_dive=MAX_DEEP_DIVE,
+        non_answer_count=non_answer_count,
+        max_non_answer=MAX_NON_ANSWER,
         prev_deep_dive_info=prev_deep_dive_info,
         conversation=_format_conversation(list(state["messages"]), limit=10),
     )
@@ -156,14 +179,30 @@ async def should_advance(
     except (json.JSONDecodeError, AttributeError):
         # JSON パース失敗時は従来通りテキストから判定
         logger.warning(f"Step {current_step}: LLM 応答の JSON パース失敗、テキストで判定: {raw[:100]}")
-        decision = "ADVANCE" if "ADVANCE" in raw.upper() else "STAY"
+        upper = raw.upper()
+        if "CLARIFY" in upper:
+            decision = "CLARIFY"
+        elif "PROCESS" in upper:
+            decision = "PROCESS"
+        elif "ADVANCE" in upper:
+            decision = "ADVANCE"
+        else:
+            decision = "STAY"
         reason = raw if decision == "STAY" else ""
 
     if decision == "ADVANCE":
         logger.debug(f"Step {current_step}: LLM 判定 → ADVANCE")
         return ("advance", "")
 
-    logger.debug(f"Step {current_step}: LLM 判定 → STAY (deep_dive {deep_dive_count + 1}, reason={reason})")
+    if decision == "CLARIFY":
+        logger.info(f"Step {current_step}: LLM 判定 → CLARIFY")
+        return ("clarify", reason)
+
+    if decision == "PROCESS":
+        logger.info(f"Step {current_step}: LLM 判定 → PROCESS")
+        return ("process", reason)
+
+    logger.info(f"Step {current_step}: LLM 判定 → STAY (deep_dive {deep_dive_count + 1}, reason={reason})")
     return ("stay", reason)
 
 
