@@ -91,19 +91,22 @@ async def connect_to_openai():
         "type": "session.update",
         "session": {
             "type": "realtime",
-            "modalities": ["text", "audio"],
-            "voice": "marin",
-            "speed": 0.9,
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.7,
-                "silence_duration_ms": 1200,
-                "prefix_padding_ms": 500,
-                # 次の会話を開始せず、 evaluate のみをトリガーする設定
-                "create_response": False,
-            },
-            "input_audio_transcription": {
-                "model": MODEL_TRANSCRIBE,
+            "output_modalities": ["audio"],
+            "audio": {
+                "input": {
+                    "transcription": {"model": MODEL_TRANSCRIBE},
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.7,
+                        "silence_duration_ms": 1200,
+                        "prefix_padding_ms": 500,
+                        "create_response": False,
+                    },
+                },
+                "output": {
+                    "voice": "marin",
+                    "speed": 0.9,
+                },
             },
         },
     }
@@ -111,6 +114,54 @@ async def connect_to_openai():
     logger.debug("Sent session.update message")
 
     return ws, event
+
+
+def normalize_session_update(event: dict) -> dict:
+    """beta SDK の旧形式を GA API の新形式に変換する.
+
+    beta SDK は voice / speed / turn_detection / input_audio_transcription を
+    session トップレベルに置くが、GA API では audio.input / audio.output に移動。
+    """
+    session = event.get("session", {})
+
+    audio_input: dict = {}
+    audio_output: dict = {}
+
+    for old_key, target in (
+        ("voice",                    ("output", "voice")),
+        ("speed",                    ("output", "speed")),
+        ("turn_detection",           ("input",  "turn_detection")),
+        ("input_audio_transcription",("input",  "transcription")),
+    ):
+        if old_key in session:
+            bucket = audio_input if target[0] == "input" else audio_output
+            bucket[target[1]] = session.pop(old_key)
+
+    # フォーマット指定は GA API でオブジェクト形式が必要だがデフォルト(pcm16)に任せる
+    for removed_format in ("input_audio_format", "output_audio_format"):
+        session.pop(removed_format, None)
+
+    if "modalities" in session:
+        session["output_modalities"] = session.pop("modalities")
+
+    if "max_response_output_tokens" in session:
+        session["max_output_tokens"] = session.pop("max_response_output_tokens")
+
+    # GA API で廃止されたフィールドを除去
+    for removed in ("temperature",):
+        session.pop(removed, None)
+
+    session.setdefault("type", "realtime")
+
+    if audio_input or audio_output:
+        audio = session.setdefault("audio", {})
+        if audio_input:
+            audio.setdefault("input", {}).update(audio_input)
+        if audio_output:
+            audio.setdefault("output", {}).update(audio_output)
+
+    event["session"] = session
+    return event
 
 
 async def inject_system_message(openai_ws, text: str) -> None:
@@ -168,14 +219,16 @@ async def run_relay(
                         logger.debug("Dropped response.create from browser (server-controlled)")
                         continue
 
-                    # session.update のインターセプト
+                    # session.update: 旧形式 → GA API 新形式に変換してからインターセプト
                     post_send_instruction = None
-                    if (
-                        on_session_update
-                        and event_type == "session.update"
-                        and event.get("session", {}).get("instructions")
-                    ):
-                        message, post_send_instruction = await on_session_update(event, ws, openai_ws)
+                    if event_type == "session.update":
+                        event = normalize_session_update(event)
+                        message = json.dumps(event)
+                        if (
+                            on_session_update
+                            and event.get("session", {}).get("instructions")
+                        ):
+                            message, post_send_instruction = await on_session_update(event, ws, openai_ws)
 
                     await openai_ws.send(message)
 
@@ -199,7 +252,7 @@ async def run_relay(
                     logger.debug(f'Relaying "{event_type}" from OpenAI')
                     debug_log_event("OpenAI -> Browser", event)
                     if event_type in ("error", "session.updated", "response.created", "response.done", "response.audio_transcript.done"):
-                        logger.info(f'OpenAI event: {event_type} | {json.dumps({k: v for k, v in event.items() if k not in ("delta", "audio")}, ensure_ascii=False)[:200]}')
+                        logger.info(f'OpenAI event: {event_type} | {json.dumps({k: v for k, v in event.items() if k not in ("delta", "audio")}, ensure_ascii=False)}')
                     await ws.send_str(message)
 
                     # ユーザートランスクリプト
