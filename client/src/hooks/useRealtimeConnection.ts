@@ -56,7 +56,7 @@ export function useRealtimeConnection(relayServerUrl: string | null) {
           setWs(newWs);
           if (wavRecorder.recording) await wavRecorder.pause();
           await wavRecorder.record((data: { mono: Float32Array }) => {
-            if (newWs.readyState === WebSocket.OPEN) {
+            if (newWs.readyState === WebSocket.OPEN && data.mono.length > 0) {
               newWs.send(
                 JSON.stringify({
                   type: "input_audio_buffer.append",
