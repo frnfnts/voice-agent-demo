@@ -76,7 +76,6 @@ async def connect_to_openai():
         extra_headers={
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json",
-            "OpenAI-Beta": "realtime=v1",
         },
         subprotocols=["realtime"],
     )
@@ -91,8 +90,7 @@ async def connect_to_openai():
     update_session = {
         "type": "session.update",
         "session": {
-            "input_audio_format": "pcm16",
-            "output_audio_format": "pcm16",
+            "type": "realtime",
             "modalities": ["text", "audio"],
             "voice": "marin",
             "speed": 0.9,
@@ -161,14 +159,20 @@ async def run_relay(
                 message = msg.data
                 try:
                     event = json.loads(message)
-                    logger.debug(f'Relaying "{event.get("type")}" to OpenAI')
+                    event_type = event.get("type")
+                    logger.debug(f'Relaying "{event_type}" to OpenAI')
                     debug_log_event("Browser -> OpenAI", event)
+
+                    # ブラウザからの response.create はサーバーが一元管理するためドロップ
+                    if event_type == "response.create":
+                        logger.debug("Dropped response.create from browser (server-controlled)")
+                        continue
 
                     # session.update のインターセプト
                     post_send_instruction = None
                     if (
                         on_session_update
-                        and event.get("type") == "session.update"
+                        and event_type == "session.update"
                         and event.get("session", {}).get("instructions")
                     ):
                         message, post_send_instruction = await on_session_update(event, ws, openai_ws)
@@ -191,8 +195,11 @@ async def run_relay(
                 message = await openai_ws.recv()
                 try:
                     event = json.loads(message)
-                    logger.debug(f'Relaying "{event.get("type")}" from OpenAI')
+                    event_type = event.get("type", "unknown")
+                    logger.debug(f'Relaying "{event_type}" from OpenAI')
                     debug_log_event("OpenAI -> Browser", event)
+                    if event_type in ("error", "session.updated", "response.created", "response.done", "response.audio_transcript.done"):
+                        logger.info(f'OpenAI event: {event_type} | {json.dumps({k: v for k, v in event.items() if k not in ("delta", "audio")}, ensure_ascii=False)[:200]}')
                     await ws.send_str(message)
 
                     # ユーザートランスクリプト

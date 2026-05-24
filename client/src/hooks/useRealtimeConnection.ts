@@ -45,10 +45,6 @@ export function useRealtimeConnection(relayServerUrl: string | null) {
         setConnectionStatus("disconnected");
       });
 
-      client.sendUserMessageContent([
-        { type: "input_text", text: "こんにちは!" },
-      ]);
-
       if (wavRecorder.recording) {
         await wavRecorder.pause();
       }
