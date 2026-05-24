@@ -95,12 +95,12 @@ export function App() {
       voice: "marin",
       // @ts-ignore
       speed: 0.9,
-      // @ts-ignore
       turn_detection: {
         type: "server_vad",
         threshold: 0.7,
         silence_duration_ms: 1200,
         prefix_padding_ms: 500,
+        // @ts-ignore
         create_response: false,
       },
       input_audio_transcription: {
