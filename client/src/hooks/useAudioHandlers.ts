@@ -4,10 +4,28 @@ import { WavStreamPlayer } from "../lib/wavtools/index.js";
 
 export function useAudioHandlers(ws: WebSocket | null) {
   const wavStreamPlayerRef = useRef<WavStreamPlayer | null>(null);
+  // Store the connect() promise so it's called exactly once across strict-mode remounts
+  const connectPromiseRef = useRef<Promise<boolean> | null>(null);
+
   if (!wavStreamPlayerRef.current) {
     wavStreamPlayerRef.current = new WavStreamPlayer({ sampleRate: 24000 });
   }
 
+  // Connect player once on mount (independent of ws lifecycle)
+  useEffect(() => {
+    const player = wavStreamPlayerRef.current!;
+    if (!connectPromiseRef.current) {
+      connectPromiseRef.current = player
+        .connect()
+        .catch((e: unknown) => {
+          console.error("WavStreamPlayer connect error:", e);
+          connectPromiseRef.current = null;
+          return false;
+        });
+    }
+  }, []);
+
+  // Register message listener when ws changes
   useEffect(() => {
     if (!ws) return;
     const player = wavStreamPlayerRef.current!;
@@ -28,7 +46,7 @@ export function useAudioHandlers(ws: WebSocket | null) {
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
           player.add16BitPCM(bytes.buffer, data.item_id);
         } catch (e) {
-          console.error("Audio playback error:", e);
+          console.error("[audio] playback error:", e);
         }
       }
 
@@ -51,13 +69,11 @@ export function useAudioHandlers(ws: WebSocket | null) {
       }
     };
 
-    // connect() が完了してから listener を登録して this.analyser null エラーを防ぐ
-    player
-      .connect()
-      .then(() => {
-        if (active) ws.addEventListener("message", handleMessage);
-      })
-      .catch((e: unknown) => console.error("WavStreamPlayer connect error:", e));
+    // Wait for connect() to finish before registering listener (ensures analyser is set)
+    const pending = connectPromiseRef.current ?? Promise.resolve();
+    pending.then(() => {
+      if (active) ws.addEventListener("message", handleMessage);
+    });
 
     return () => {
       active = false;
