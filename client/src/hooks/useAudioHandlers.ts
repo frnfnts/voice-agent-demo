@@ -23,6 +23,19 @@ export function useAudioHandlers(ws: WebSocket | null) {
           return false;
         });
     }
+
+    // Resume suspended AudioContext on any user interaction (autoplay policy)
+    const tryResume = () => {
+      if (player.context?.state === "suspended") {
+        player.context.resume().catch(() => {});
+      }
+    };
+    document.addEventListener("click", tryResume);
+    document.addEventListener("touchend", tryResume);
+    return () => {
+      document.removeEventListener("click", tryResume);
+      document.removeEventListener("touchend", tryResume);
+    };
   }, []);
 
   // Register message listener when ws changes
@@ -40,11 +53,17 @@ export function useAudioHandlers(ws: WebSocket | null) {
       }
 
       if (data.type === "response.audio.delta" && data.delta) {
+        console.log("[audio] delta received, bytes:", data.delta.length, "item_id:", data.item_id, "context:", player.context?.state);
+        // Opportunistically resume if suspended (works if a user gesture occurred recently)
+        if (player.context?.state === "suspended") {
+          player.context.resume().catch(() => {});
+        }
         try {
           const binary = atob(data.delta);
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          player.add16BitPCM(bytes.buffer, data.item_id);
+          player.add16BitPCM(bytes.buffer, data.item_id ?? "default");
+          console.log("[audio] add16BitPCM ok, context state:", player.context?.state);
         } catch (e) {
           console.error("[audio] playback error:", e);
         }
@@ -72,7 +91,12 @@ export function useAudioHandlers(ws: WebSocket | null) {
     // Wait for connect() to finish before registering listener (ensures analyser is set)
     const pending = connectPromiseRef.current ?? Promise.resolve();
     pending.then(() => {
-      if (active) ws.addEventListener("message", handleMessage);
+      if (!active) return;
+      // Opportunistically resume if page had a prior user activation (e.g. mic grant)
+      if (player.context?.state === "suspended") {
+        player.context.resume().catch(() => {});
+      }
+      ws.addEventListener("message", handleMessage);
     });
 
     return () => {
