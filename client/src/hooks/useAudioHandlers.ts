@@ -1,58 +1,54 @@
 import { useEffect, useRef } from "react";
-import { RealtimeClient } from "@openai/realtime-api-beta";
 // @ts-expect-error - External library without type definitions
-import { WavRecorder, WavStreamPlayer } from "../lib/wavtools/index.js";
+import { WavStreamPlayer } from "../lib/wavtools/index.js";
 
-export function useAudioHandlers(client: RealtimeClient | null) {
+export function useAudioHandlers(ws: WebSocket | null) {
   const wavStreamPlayerRef = useRef<WavStreamPlayer | null>(null);
   if (!wavStreamPlayerRef.current) {
     wavStreamPlayerRef.current = new WavStreamPlayer({ sampleRate: 24000 });
   }
 
   useEffect(() => {
-    if (!client) return;
-    const wavStreamPlayer = wavStreamPlayerRef.current;
-    if (!wavStreamPlayer) return;
+    if (!ws) return;
+    const player = wavStreamPlayerRef.current!;
+    player.connect();
 
-    let connected = false;
+    const handleMessage = async (event: MessageEvent) => {
+      let data: any;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
 
-    wavStreamPlayer.connect().then(() => {
-      connected = true;
-    });
+      if (data.type === "response.audio.delta" && data.delta) {
+        const binary = atob(data.delta);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        player.add16BitPCM(bytes.buffer, data.item_id);
+      }
 
-    const onInterrupted = async () => {
-      const trackSampleOffset = await wavStreamPlayer.interrupt();
-      if (trackSampleOffset?.trackId) {
-        const { trackId, offset } = trackSampleOffset;
-        await client.cancelResponse(trackId, offset);
+      if (data.type === "input_audio_buffer.speech_started") {
+        const trackSampleOffset = await player.interrupt();
+        if (trackSampleOffset?.trackId && ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "conversation.item.truncate",
+              item_id: trackSampleOffset.trackId,
+              content_index: 0,
+              audio_end_ms: Math.floor(
+                (trackSampleOffset.offset / 24000) * 1000
+              ),
+            })
+          );
+        }
       }
     };
 
-    const onUpdated = async ({ item, delta }: any) => {
-      client.conversation.getItems();
-      if (delta?.audio) {
-        wavStreamPlayer.add16BitPCM(delta.audio, item.id);
-      }
-      if (item.status === "completed" && item.formatted.audio?.length) {
-        const wavFile = await WavRecorder.decode(
-          item.formatted.audio,
-          24000,
-          24000
-        );
-        item.formatted.file = wavFile;
-      }
-    };
-
-    client.on("error", (event: any) => console.error(event));
-    client.on("conversation.interrupted", onInterrupted);
-    client.on("conversation.updated", onUpdated);
-
+    ws.addEventListener("message", handleMessage);
     return () => {
-      client.off("conversation.interrupted", onInterrupted);
-      client.off("conversation.updated", onUpdated);
-      if (connected) {
-        wavStreamPlayer.interrupt();
-      }
+      ws.removeEventListener("message", handleMessage);
+      player.interrupt();
     };
-  }, [client]);
+  }, [ws]);
 }

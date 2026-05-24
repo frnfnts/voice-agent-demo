@@ -47,7 +47,7 @@ export function App() {
     []
   );
 
-  const { client, connectionStatus, connect, stopRecording } =
+  const { ws, connectionStatus, connect, stopRecording } =
     useRealtimeConnection(RELAY_SERVER_URL);
 
   const { instructionInfo } =
@@ -62,14 +62,14 @@ export function App() {
   );
 
   const { interviewState } = useInterviewState(
-    client,
+    ws,
     IS_DEBUG,
     onInterviewComplete,
     addLog
   );
 
-  // client が出力した音声を再生するハンドラー
-  useAudioHandlers(client);
+  // ws が出力した音声を再生するハンドラー
+  useAudioHandlers(ws);
 
   // Connect on mount (if no error)
   useEffect(() => {
@@ -80,35 +80,39 @@ export function App() {
 
   // Send session config when instructions are ready
   useEffect(() => {
-    if (!client) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !instructionInfo.text) return;
     const payload = JSON.stringify({
-      instruction: instructionInfo.text || "",
+      instruction: instructionInfo.text,
       scenario: SCENARIO,
       is_debug: IS_DEBUG,
     });
-    client.updateSession({
-      // @ts-ignore
-      type: "realtime",
-      instructions: payload,
-      modalities: ["text", "audio"],
-      // @ts-ignore
-      voice: "marin",
-      // @ts-ignore
-      speed: 0.9,
-      turn_detection: {
-        type: "server_vad",
-        threshold: 0.7,
-        silence_duration_ms: 1200,
-        prefix_padding_ms: 500,
-        // @ts-ignore
-        create_response: false,
-      },
-      input_audio_transcription: {
-        // @ts-ignore
-        model: "gpt-4o-mini-transcribe",
-      },
-    });
-  }, [instructionInfo, client]);
+    ws.send(
+      JSON.stringify({
+        type: "session.update",
+        session: {
+          type: "realtime",
+          output_modalities: ["audio"],
+          instructions: payload,
+          audio: {
+            input: {
+              transcription: { model: "gpt-4o-mini-transcribe" },
+              turn_detection: {
+                type: "server_vad",
+                threshold: 0.7,
+                silence_duration_ms: 1200,
+                prefix_padding_ms: 500,
+                create_response: false,
+              },
+            },
+            output: {
+              voice: "marin",
+              speed: 0.9,
+            },
+          },
+        },
+      })
+    );
+  }, [instructionInfo, ws]);
 
   const statusClass = instructionInfo?.error ? "error" : connectionStatus;
   const statusLabel = instructionInfo?.error
