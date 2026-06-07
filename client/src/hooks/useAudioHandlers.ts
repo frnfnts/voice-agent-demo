@@ -1,58 +1,108 @@
 import { useEffect, useRef } from "react";
-import { RealtimeClient } from "@openai/realtime-api-beta";
 // @ts-expect-error - External library without type definitions
-import { WavRecorder, WavStreamPlayer } from "../lib/wavtools/index.js";
+import { WavStreamPlayer } from "../lib/wavtools/index.js";
 
-export function useAudioHandlers(client: RealtimeClient | null) {
+export function useAudioHandlers(ws: WebSocket | null) {
   const wavStreamPlayerRef = useRef<WavStreamPlayer | null>(null);
+  // Store the connect() promise so it's called exactly once across strict-mode remounts
+  const connectPromiseRef = useRef<Promise<boolean> | null>(null);
+
   if (!wavStreamPlayerRef.current) {
     wavStreamPlayerRef.current = new WavStreamPlayer({ sampleRate: 24000 });
   }
 
+  // Connect player once on mount (independent of ws lifecycle)
   useEffect(() => {
-    if (!client) return;
-    const wavStreamPlayer = wavStreamPlayerRef.current;
-    if (!wavStreamPlayer) return;
+    const player = wavStreamPlayerRef.current!;
+    if (!connectPromiseRef.current) {
+      connectPromiseRef.current = player
+        .connect()
+        .catch((e: unknown) => {
+          console.error("WavStreamPlayer connect error:", e);
+          connectPromiseRef.current = null;
+          return false;
+        });
+    }
 
-    let connected = false;
+    // Resume suspended AudioContext on any user interaction (autoplay policy)
+    const tryResume = () => {
+      if (player.context?.state === "suspended") {
+        player.context.resume().catch(() => {});
+      }
+    };
+    document.addEventListener("click", tryResume);
+    document.addEventListener("touchend", tryResume);
+    return () => {
+      document.removeEventListener("click", tryResume);
+      document.removeEventListener("touchend", tryResume);
+    };
+  }, []);
 
-    wavStreamPlayer.connect().then(() => {
-      connected = true;
+  // Register message listener when ws changes
+  useEffect(() => {
+    if (!ws) return;
+    const player = wavStreamPlayerRef.current!;
+    let active = true;
+
+    const handleMessage = (event: MessageEvent) => {
+      let data: any;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (data.type === "response.output_audio.delta" && data.delta) {
+        console.log("[audio] delta received, bytes:", data.delta.length, "item_id:", data.item_id, "context:", player.context?.state);
+        // Opportunistically resume if suspended (works if a user gesture occurred recently)
+        if (player.context?.state === "suspended") {
+          player.context.resume().catch(() => {});
+        }
+        try {
+          const binary = atob(data.delta);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          player.add16BitPCM(bytes.buffer, data.item_id ?? "default");
+          console.log("[audio] add16BitPCM ok, context state:", player.context?.state);
+        } catch (e) {
+          console.error("[audio] playback error:", e);
+        }
+      }
+
+      if (data.type === "input_audio_buffer.speech_started") {
+        player.interrupt().then((trackSampleOffset: any) => {
+          if (!active || !trackSampleOffset?.trackId) return;
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "conversation.item.truncate",
+                item_id: trackSampleOffset.trackId,
+                content_index: 0,
+                audio_end_ms: Math.floor(
+                  (trackSampleOffset.offset / 24000) * 1000
+                ),
+              })
+            );
+          }
+        });
+      }
+    };
+
+    // Wait for connect() to finish before registering listener (ensures analyser is set)
+    const pending = connectPromiseRef.current ?? Promise.resolve();
+    pending.then(() => {
+      if (!active) return;
+      // Opportunistically resume if page had a prior user activation (e.g. mic grant)
+      if (player.context?.state === "suspended") {
+        player.context.resume().catch(() => {});
+      }
+      ws.addEventListener("message", handleMessage);
     });
 
-    const onInterrupted = async () => {
-      const trackSampleOffset = await wavStreamPlayer.interrupt();
-      if (trackSampleOffset?.trackId) {
-        const { trackId, offset } = trackSampleOffset;
-        await client.cancelResponse(trackId, offset);
-      }
-    };
-
-    const onUpdated = async ({ item, delta }: any) => {
-      client.conversation.getItems();
-      if (delta?.audio) {
-        wavStreamPlayer.add16BitPCM(delta.audio, item.id);
-      }
-      if (item.status === "completed" && item.formatted.audio?.length) {
-        const wavFile = await WavRecorder.decode(
-          item.formatted.audio,
-          24000,
-          24000
-        );
-        item.formatted.file = wavFile;
-      }
-    };
-
-    client.on("error", (event: any) => console.error(event));
-    client.on("conversation.interrupted", onInterrupted);
-    client.on("conversation.updated", onUpdated);
-
     return () => {
-      client.off("conversation.interrupted", onInterrupted);
-      client.off("conversation.updated", onUpdated);
-      if (connected) {
-        wavStreamPlayer.interrupt();
-      }
+      active = false;
+      ws.removeEventListener("message", handleMessage);
+      player.interrupt();
     };
-  }, [client]);
+  }, [ws]);
 }
