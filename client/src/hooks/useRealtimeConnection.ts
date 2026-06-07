@@ -4,12 +4,11 @@ import { WavRecorder } from "../lib/wavtools/index.js";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
-function float32ToBase64PCM16(float32Array: Float32Array): string {
-  const int16 = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    int16[i] = Math.max(-32768, Math.min(32767, float32Array[i] * 32768));
-  }
-  const bytes = new Uint8Array(int16.buffer);
+// WavRecorder の record コールバックが渡す data.mono は、
+// 既に PCM16 (little-endian) にエンコード済みの ArrayBuffer。
+// そのまま base64 化して input_audio_buffer.append で送る。
+function pcm16ArrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
   let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
@@ -55,12 +54,12 @@ export function useRealtimeConnection(relayServerUrl: string | null) {
           setConnectionStatus("connected");
           setWs(newWs);
           if (wavRecorder.recording) await wavRecorder.pause();
-          await wavRecorder.record((data: { mono: Float32Array }) => {
-            if (newWs.readyState === WebSocket.OPEN && data.mono.length > 0) {
+          await wavRecorder.record((data: { mono: ArrayBuffer }) => {
+            if (newWs.readyState === WebSocket.OPEN && data.mono.byteLength > 0) {
               newWs.send(
                 JSON.stringify({
                   type: "input_audio_buffer.append",
-                  audio: float32ToBase64PCM16(data.mono),
+                  audio: pcm16ArrayBufferToBase64(data.mono),
                 })
               );
             }
