@@ -61,7 +61,7 @@ def debug_log_event(message: str, event: dict) -> None:
             truncated["session"]["instructions"] = inst[:100] + "..."
     if "delta" in truncated and isinstance(truncated.get("delta"), str) and len(truncated["delta"]) > 100:
         truncated["delta"] = truncated["delta"][:100] + "..."
-    if event.get("type") == "response.audio_transcript.delta":
+    if event.get("type") == "response.output_audio_transcript.delta":
         return
 
     logger.debug(f"{message}: {json.dumps(truncated, indent=2, ensure_ascii=False)}")
@@ -202,7 +202,7 @@ async def run_relay(
                     event_type = event.get("type", "unknown")
                     logger.debug(f'Relaying "{event_type}" from OpenAI')
                     debug_log_event("OpenAI -> Browser", event)
-                    if event_type in ("error", "session.updated", "response.created", "response.done", "response.audio_transcript.done"):
+                    if event_type in ("error", "session.updated", "response.created", "response.done", "response.output_audio_transcript.done"):
                         logger.info(f'OpenAI event: {event_type} | {json.dumps({k: v for k, v in event.items() if k not in ("delta", "audio")}, ensure_ascii=False)}')
                     await ws.send_str(message)
 
@@ -221,7 +221,7 @@ async def run_relay(
                     # AI トランスクリプト
                     if (
                         on_ai_transcript
-                        and event.get("type") == "response.audio_transcript.done"
+                        and event.get("type") == "response.output_audio_transcript.done"
                     ):
                         transcript = event.get("transcript", "").strip()
                         if transcript:

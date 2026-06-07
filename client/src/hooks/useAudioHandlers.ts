@@ -52,7 +52,7 @@ export function useAudioHandlers(ws: WebSocket | null) {
         return;
       }
 
-      if (data.type === "response.audio.delta" && data.delta) {
+      if (data.type === "response.output_audio.delta" && data.delta) {
         console.log("[audio] delta received, bytes:", data.delta.length, "item_id:", data.item_id, "context:", player.context?.state);
         // Opportunistically resume if suspended (works if a user gesture occurred recently)
         if (player.context?.state === "suspended") {
