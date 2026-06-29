@@ -5,6 +5,7 @@ import { useRealtimeConnection } from "./hooks/useRealtimeConnection.js";
 import { useInstructions } from "./hooks/useInstructions.js";
 import { useInterviewState } from "./hooks/useInterviewState.js";
 import { useAudioHandlers } from "./hooks/useAudioHandlers.js";
+import { useUserVoiceActivity } from "./hooks/useUserVoiceActivity.js";
 import { DebugPanel } from "./components/DebugPanel.js";
 import { MessageStack } from "./components/MessageStack.js";
 
@@ -47,7 +48,7 @@ export function App() {
     []
   );
 
-  const { ws, connectionStatus, connect, stopRecording } =
+  const { ws, connectionStatus, connect, stopRecording, wavRecorderRef } =
     useRealtimeConnection(RELAY_SERVER_URL);
 
   const { instructionInfo } =
@@ -70,6 +71,11 @@ export function App() {
 
   // ws が出力した音声を再生するハンドラー
   useAudioHandlers(ws);
+
+  const { muteWarning } = useUserVoiceActivity(
+    wavRecorderRef,
+    connectionStatus === "connected"
+  );
 
   // Connect on mount (if no error)
   useEffect(() => {
@@ -140,6 +146,17 @@ export function App() {
         </div>
 
         <MessageStack instructionInfo={instructionInfo} />
+
+        {muteWarning && (
+          <div className="message-stack">
+            <div className="message-box warn mute-warning">
+              <div className="message-title">マイクがミュートになっていませんか?</div>
+              <div className="message-body">
+                しばらく音声が検出されていません。マイクの設定をご確認ください。
+              </div>
+            </div>
+          </div>
+        )}
 
         {IS_DEBUG && (
           <DebugPanel

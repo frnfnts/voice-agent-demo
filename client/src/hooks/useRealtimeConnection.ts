@@ -91,5 +91,6 @@ export function useRealtimeConnection(relayServerUrl: string | null) {
     connect,
     disconnect,
     stopRecording,
+    wavRecorderRef,
   };
 }

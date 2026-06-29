@@ -341,6 +341,22 @@
   padding: 8px 12px;
 }
 
+/* ── Mute Warning ── */
+.mute-warning {
+  animation: fadeInDown 0.3s ease;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .status-panel.debug .message-body {
   font-size: 1.3rem;
 }
